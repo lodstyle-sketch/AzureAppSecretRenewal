@@ -10,7 +10,7 @@ from credential_renewal.auth import is_authorized_responsible, principal_from_ea
 from credential_renewal.azure_identity import ManagedIdentityTokenProvider
 from credential_renewal.bitwarden import BitwardenSendClient
 from credential_renewal.config import Settings
-from credential_renewal.cosmos_store import CosmosCaseStore
+from credential_renewal.cosmos_store import CosmosArchiveStore, CosmosCaseStore
 from credential_renewal.graph_client import GraphClient
 from credential_renewal.models import CaseState, CredentialCase, CredentialType
 from credential_renewal.tokens import TokenError, validate_case_token
@@ -24,7 +24,8 @@ def build_dependencies() -> tuple[Settings, CosmosCaseStore, CaseWorkflow]:
     settings = Settings.from_environment()
     graph = GraphClient(settings.graph_base_url, ManagedIdentityTokenProvider())
     store = CosmosCaseStore(settings.cosmos_account_url, settings.cosmos_database, settings.cosmos_container)
-    workflow = CaseWorkflow(store, graph, BitwardenSendClient())
+    archive_store = CosmosArchiveStore(settings.cosmos_account_url, settings.cosmos_database, settings.cosmos_archive_container)
+    workflow = CaseWorkflow(store, graph, BitwardenSendClient(), archive_store)
     return settings, store, workflow
 
 

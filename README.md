@@ -4,7 +4,8 @@ This repository contains a Python implementation for detecting expiring Entra ID
 
 The solution has two runtime entry points:
 
-- **Azure Automation runbook**: scans App Registrations, enriches findings with an internal application system, writes Cosmos DB cases, and sends notification emails.
+- **Azure Automation runbook**: scans App Registrations, writes a full app overview, enriches expiring credentials with an internal application system, writes Cosmos DB cases, sends owner notifications, and sends a department summary.
+- **Reporting export runbook**: exports cases, App Registration overview, and archive records to Log Analytics for Grafana.
 - **Azure Web App**: shows each case to authorized responsible users and lets them renew a secret, defer renewal, or delete the old secret after a new one was created.
 
 Version 1 renews **client secrets** automatically. Certificates are detected and shown, but certificate renewal is intentionally out of scope because private-key generation and delivery require a separate security design.
@@ -23,6 +24,8 @@ The link is not single-use. It can be opened multiple times until the original o
 
 When a user renews a secret, Microsoft Graph creates a new password credential and returns `secretText` once. The Web App immediately creates a Bitwarden Send link and stores only metadata in Cosmos DB. The old secret is not deleted automatically. A separate **Delete old secret** button appears after renewal and asks for explicit confirmation before Graph `removePassword` is called.
 
+Every scan also writes a full App Registration overview record for every discovered application. Apps without `serviceManagementReference` are visible in the overview but do not start the owner workflow. Apps that disappear from later scans are marked `deleted` and written to the archive. After each completed scan, a department summary email is sent with all credentials expiring inside the configured window, including apps missing the internal app code.
+
 ## Required Azure Resources
 
 - Azure Automation Account with a system-assigned or user-assigned managed identity.
@@ -40,6 +43,16 @@ Recommended Cosmos DB container:
 Database: credential-renewal
 Container: credential-renewal-cases
 Partition key: /caseId
+```
+
+Additional Cosmos DB containers:
+
+```text
+Container: credential-renewal-app-overview
+Partition key: /appObjectId
+
+Container: credential-renewal-archive
+Partition key: /archiveId
 ```
 
 ## Microsoft Graph Permissions
@@ -65,9 +78,17 @@ INTERNAL_API_BASE_URL="https://internal-api.example.com"
 COSMOS_ACCOUNT_URL="https://cosmos-account.documents.azure.com:443/"
 COSMOS_DATABASE="credential-renewal"
 COSMOS_CONTAINER="credential-renewal-cases"
+COSMOS_APP_OVERVIEW_CONTAINER="credential-renewal-app-overview"
+COSMOS_ARCHIVE_CONTAINER="credential-renewal-archive"
 WEBAPP_PUBLIC_BASE_URL="https://credential-renewal.example.com"
 MAIL_SHARED_MAILBOX="credential-renewal@example.com"
+DEPARTMENT_SUMMARY_MAILBOX="department@example.com"
 BITWARDEN_MODE="send"
+LOG_ANALYTICS_DCE_URL="https://dce.example.region.ingest.monitor.azure.com"
+LOG_ANALYTICS_DCR_IMMUTABLE_ID="dcr-immutable-id"
+LOG_ANALYTICS_CASES_STREAM_NAME="Custom-CredentialRenewalCases_CL"
+LOG_ANALYTICS_OVERVIEW_STREAM_NAME="Custom-CredentialRenewalAppOverview_CL"
+LOG_ANALYTICS_ARCHIVE_STREAM_NAME="Custom-CredentialRenewalArchive_CL"
 LINK_SIGNING_KEY="replace-with-key-vault-in-production"
 # Or use Key Vault:
 KEY_VAULT_URL="https://your-vault.vault.azure.net/"
@@ -108,6 +129,8 @@ Example response:
 
 The `responsibles` array must contain email or UPN values. Display names are not used as identifiers because they are not unique.
 
+If an expiring App Registration has no `serviceManagementReference`, the scan stores it in the app overview and department summary but does not create a credential case or owner notification. After the internal app code is added, the next scan starts the normal workflow.
+
 ## Cosmos DB Case Schema
 
 Each case stores:
@@ -134,6 +157,12 @@ Supported states:
 
 Secret values must never be stored in Cosmos DB, logs, emails, or audit events.
 
+## App Overview And Archive
+
+The scan runbook upserts one overview document per App Registration, even when no credential expires. This overview supports operational cleanup for apps missing an internal app code. The Grafana overview dashboard defaults to **Missing internal code** and can be switched to all apps or only apps with a code.
+
+Archive records are created for secret renewal, old-secret deletion after Web App confirmation, and App Registration deletion detected by comparing the latest scan with previous overview records.
+
 ## Runbook Deployment
 
 1. Create or select an Azure Automation Account.
@@ -142,7 +171,8 @@ Secret values must never be stored in Cosmos DB, logs, emails, or audit events.
 4. Configure required environment variables as Automation variables or process environment variables.
 5. Deploy the package files to the Automation Python runtime.
 6. Use `credential_renewal.runbook_scan:main` as the runbook entry point.
-7. Schedule the runbook daily.
+7. Schedule the scan runbook daily.
+8. Schedule `credential_renewal.reporting_export:main` at the desired reporting cadence for Log Analytics/Grafana.
 
 For local validation:
 
@@ -151,6 +181,8 @@ python -m credential_renewal.runbook_scan
 ```
 
 The runbook is idempotent by case ID. Repeated scans update the same case instead of creating duplicates. Emails are sent only once per case unless you clear `email_sent_at`.
+
+After every scan run, a department summary email is sent to `DEPARTMENT_SUMMARY_MAILBOX`. The summary includes all credentials expiring inside `EXPIRY_WINDOW_DAYS`, case state when available, owner emails when resolved, and a note for missing `serviceManagementReference`.
 
 ## Web App Deployment
 
@@ -197,6 +229,22 @@ In production, ensure the Web App runtime has:
 - A secure enterprise-approved login method.
 - Access policies that allow Send creation.
 - Monitoring for failed Send creation.
+
+## Grafana Reporting
+
+The reporting export entry point is:
+
+```bash
+python -m credential_renewal.reporting_export
+```
+
+It exports to `CredentialRenewalCases_CL`, `CredentialRenewalAppOverview_CL`, and `CredentialRenewalArchive_CL`. Import these dashboard templates from `grafana/`:
+
+- `credential-renewal-cases-dashboard.json`
+- `app-registration-overview-dashboard.json`
+- `credential-renewal-archive-dashboard.json`
+
+The app overview dashboard includes a dropdown that defaults to apps without an internal app code.
 
 ## Example Notification Email
 
@@ -274,6 +322,7 @@ Common failures:
 - Graph `addPassword` failure: verify Web App managed identity permissions.
 - Graph `removePassword` failure: verify the old credential still exists and permissions are granted.
 - Bitwarden Send failure: do not retry with email or logs containing the secret; retry the renewal action after fixing Bitwarden.
+- Reporting export failure: verify Data Collection Endpoint, Data Collection Rule, stream names, and managed identity permissions.
 
 Safe recovery:
 
@@ -286,6 +335,7 @@ Safe recovery:
 
 - Do not store secret values in Cosmos DB.
 - Do not write secret values to logs.
+- Do not export secret values to Log Analytics.
 - Keep Web App case links signed and time-limited to the old credential expiry.
 - Require Entra ID login in addition to the signed link.
 - Keep Bitwarden Send links short-lived and limited-access.
@@ -298,6 +348,7 @@ Safe recovery:
 credential_renewal/
   auth.py             # Web App identity helpers.
   azure_identity.py   # Managed identity token provider.
+  archive.py          # Archive record helpers.
   bitwarden.py        # Bitwarden Send adapter.
   case_ids.py         # Stable idempotent case IDs.
   config.py           # Environment-based settings.
@@ -308,6 +359,7 @@ credential_renewal/
   mailer.py           # Shared-mailbox email delivery.
   models.py           # Case and credential models.
   runbook_scan.py     # Azure Automation entry point.
+  reporting_export.py # Log Analytics reporting export entry point.
   tokens.py           # Reusable signed case links.
   web_app.py          # FastAPI Web App.
   workflow.py         # Renew, defer, and old-secret deletion logic.

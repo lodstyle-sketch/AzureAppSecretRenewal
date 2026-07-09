@@ -1,0 +1,40 @@
+{
+  "title": "Azure App Registration Overview",
+  "uid": "app-registration-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1h",
+  "time": { "from": "now-30d", "to": "now" },
+  "timezone": "browser",
+  "tags": ["azure", "app-registration", "credential-renewal"],
+  "templating": {
+    "list": [
+      { "name": "datasource", "type": "datasource", "query": "grafana-azure-monitor-datasource", "label": "Azure Monitor datasource" },
+      { "name": "internalCodeFilter", "type": "custom", "label": "Internal app code", "query": "Missing internal code,All,With internal code", "current": { "text": "Missing internal code", "value": "Missing internal code" } },
+      { "name": "azureAppName", "type": "textbox", "label": "Azure App Name", "query": "", "current": { "text": "", "value": "" } },
+      { "name": "owner", "type": "textbox", "label": "Owner", "query": "", "current": { "text": "", "value": "" } }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "App Registrations",
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${datasource}" },
+      "gridPos": { "h": 18, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${datasource}" },
+          "azureLogAnalytics": {
+            "resultFormat": "table",
+            "query": "CredentialRenewalAppOverview_CL\n| where '$internalCodeFilter' == 'All' or ('$internalCodeFilter' == 'Missing internal code' and HasInternalCode_bool == false) or ('$internalCodeFilter' == 'With internal code' and HasInternalCode_bool == true)\n| where isempty('$azureAppName') or AzureAppName_s contains '$azureAppName'\n| where isempty('$owner') or OwnersText_s contains '$owner'\n| summarize arg_max(TimeGenerated, *) by AzureAppObjectId_s\n| project AzureAppName=AzureAppName_s, AzureAppId=AzureAppId_s, InternalCode=ServiceManagementReference_s, Status=Status_s, SecretCount=SecretCount_d, CertificateCount=CertificateCount_d, NextSecretExpiry=NextSecretExpiry_t, NextCertificateExpiry=NextCertificateExpiry_t, OwnerEmails=OwnerEmails_s, LastSeenAt=LastSeenAt_t, DeletedAt=DeletedAt_t\n| order by AzureAppName asc"
+          }
+        }
+      ],
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    }
+  ]
+}

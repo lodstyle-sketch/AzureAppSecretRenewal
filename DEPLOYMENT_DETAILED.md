@@ -6,9 +6,10 @@ Der Branch `main` enthaelt:
 
 - Azure Automation Runbook zum Scannen auslaufender App-Registration-Credentials.
 - FastAPI Web App fuer Entscheidungen der Verantwortlichen.
-- Cosmos DB als Case-Speicher.
+- Cosmos DB als Case-, App-Overview- und Archiv-Speicher.
 - Microsoft Graph fuer App Registration, User Lookup, Mailversand und Secret-Erneuerung.
 - Bitwarden Send fuer die Uebergabe neu erzeugter Secrets.
+- Log Analytics und Grafana fuer Case-, App-Overview- und Archiv-Reports.
 
 Cherwell und Grafana sind nicht Bestandteil dieses Branches.
 
@@ -72,6 +73,14 @@ Lege dir vor dem Start diese Werte bereit:
 6. Partition key: `/caseId`.
 7. Throughput je nach Umgebung setzen.
 8. **OK** auswaehlen.
+9. **New Container** erneut auswaehlen.
+10. Container ID: `credential-renewal-app-overview`.
+11. Partition key: `/appObjectId`.
+12. **OK** auswaehlen.
+13. **New Container** erneut auswaehlen.
+14. Container ID: `credential-renewal-archive`.
+15. Partition key: `/archiveId`.
+16. **OK** auswaehlen.
 
 ## 4. Key Vault
 
@@ -155,9 +164,17 @@ INTERNAL_API_BASE_URL=https://internal-api.example.com
 COSMOS_ACCOUNT_URL=https://<cosmos-account>.documents.azure.com:443/
 COSMOS_DATABASE=credential-renewal
 COSMOS_CONTAINER=credential-renewal-cases
+COSMOS_APP_OVERVIEW_CONTAINER=credential-renewal-app-overview
+COSMOS_ARCHIVE_CONTAINER=credential-renewal-archive
 WEBAPP_PUBLIC_BASE_URL=https://<web-app-name>.azurewebsites.net
 MAIL_SHARED_MAILBOX=credential-renewal@example.com
+DEPARTMENT_SUMMARY_MAILBOX=department@example.com
 BITWARDEN_MODE=send
+LOG_ANALYTICS_DCE_URL=https://<dce-name>.<region>.ingest.monitor.azure.com
+LOG_ANALYTICS_DCR_IMMUTABLE_ID=<dcr-immutable-id>
+LOG_ANALYTICS_CASES_STREAM_NAME=Custom-CredentialRenewalCases_CL
+LOG_ANALYTICS_OVERVIEW_STREAM_NAME=Custom-CredentialRenewalAppOverview_CL
+LOG_ANALYTICS_ARCHIVE_STREAM_NAME=Custom-CredentialRenewalArchive_CL
 KEY_VAULT_URL=https://<key-vault-name>.vault.azure.net/
 LINK_SIGNING_KEY_SECRET_NAME=credential-renewal-link-signing-key
 ```
@@ -284,6 +301,17 @@ Setze dieselben zentralen Werte wie bei der Web App:
 8. **Link to schedule** auswaehlen.
 9. Schedule verbinden.
 
+### 7.7 Reporting Export Runbook erstellen
+
+1. Automation Account oeffnen.
+2. Links **Process Automation > Runbooks** auswaehlen.
+3. **Create a runbook** auswaehlen.
+4. Name: `Export-CredentialRenewal-Reporting`.
+5. Runbook type: Python.
+6. Entry Point: `credential_renewal.reporting_export.main`.
+7. Schedule erstellen, z. B. stuendlich oder nach Reporting-Anforderung.
+8. Runbook ueber **Link to schedule** mit dem Schedule verbinden.
+
 ## 8. Rechte vergeben
 
 ### 8.1 Cosmos DB Zugriff
@@ -321,7 +349,28 @@ Vorgehen nach Unternehmensstandard:
 4. API Permissions beziehungsweise App Role Assignments konfigurieren.
 5. Admin Consent erteilen.
 
-## 9. Internes REST-System pruefen
+### 8.4 Log Analytics Rechte
+
+1. Data Collection Rule oder Resource Group oeffnen.
+2. Links **Access control (IAM)** auswaehlen.
+3. **Add role assignment** auswaehlen.
+4. Rolle fuer Logs Ingestion nach Unternehmensstandard vergeben.
+5. Automation Account Identity auswaehlen.
+
+## 9. Grafana vorbereiten
+
+1. Grafana oeffnen.
+2. Links **Connections > Data sources** auswaehlen.
+3. Azure Monitor Datasource konfigurieren oder bestehende auswaehlen.
+4. Links **Dashboards** auswaehlen.
+5. **New > Import** auswaehlen.
+6. `grafana/credential-renewal-cases-dashboard.json` importieren.
+7. `grafana/app-registration-overview-dashboard.json` importieren.
+8. `grafana/credential-renewal-archive-dashboard.json` importieren.
+9. Im App-Overview-Dashboard den Schalter **Internal app code** testen.
+10. Standardwert ist **Missing internal code**, damit fehlende interne App-Kuerzel sichtbar sind.
+
+## 10. Internes REST-System pruefen
 
 1. Stelle sicher, dass `INTERNAL_API_BASE_URL` aus Azure erreichbar ist.
 2. Endpoint pruefen:
@@ -334,7 +383,7 @@ GET /applications/{serviceManagementReference}/responsibles
 4. Jeder Responsible muss `email` oder `upn` enthalten.
 5. Anzeigenamen allein reichen nicht.
 
-## 10. Smoke Test
+## 11. Smoke Test
 
 1. Entra Admin Center oeffnen.
 2. **Identity > Applications > App registrations** auswaehlen.
@@ -345,27 +394,34 @@ GET /applications/{serviceManagementReference}/responsibles
 7. Automation Runbook manuell starten.
 8. Cosmos DB **Data Explorer** oeffnen.
 9. Case in `credential-renewal-cases` pruefen.
-10. Mailzustellung an Responsible User pruefen.
-11. Link in der Mail oeffnen.
-12. Entra ID Login pruefen.
-13. **Renew secret** klicken.
-14. Bitwarden Send Link pruefen.
-15. In Entra ID pruefen, dass altes und neues Secret vorhanden sind.
-16. **Delete old secret** klicken.
-17. Browser-Confirm bestaetigen.
-18. In Entra ID pruefen, dass das alte Secret entfernt wurde.
+10. App Overview in `credential-renewal-app-overview` pruefen.
+11. Abteilungszusammenfassung im `DEPARTMENT_SUMMARY_MAILBOX` pruefen.
+12. Mailzustellung an Responsible User pruefen.
+13. Link in der Mail oeffnen.
+14. Entra ID Login pruefen.
+15. **Renew secret** klicken.
+16. Bitwarden Send Link pruefen.
+17. In Entra ID pruefen, dass altes und neues Secret vorhanden sind.
+18. **Delete old secret** klicken.
+19. Browser-Confirm bestaetigen.
+20. In Entra ID pruefen, dass das alte Secret entfernt wurde.
+21. Archiv in `credential-renewal-archive` pruefen.
+22. Reporting Export Runbook starten.
+23. Grafana Dashboards pruefen.
 
-## 11. Fehlendes internes App-Kuerzel testen
+## 12. Fehlendes internes App-Kuerzel testen
 
 1. App Registration mit auslaufendem Credential ohne `serviceManagementReference` vorbereiten.
 2. Runbook starten.
-3. Runbook Log pruefen.
-4. Erwartung: Mapping-Fehler beziehungsweise Skip wird sichtbar.
-5. Internes App-Kuerzel nachtragen.
-6. Runbook erneut starten.
-7. Erwartung: normaler Workflow startet.
+3. App Overview Container pruefen.
+4. Erwartung: App ist sichtbar, aber kein Case wurde erstellt.
+5. Department Summary pruefen.
+6. Erwartung: fehlendes internes App-Kuerzel ist markiert.
+7. Internes App-Kuerzel nachtragen.
+8. Runbook erneut starten.
+9. Erwartung: normaler Workflow startet.
 
-## 12. Betriebsueberwachung
+## 13. Betriebsueberwachung
 
 Pruefe regelmaessig:
 
@@ -376,12 +432,15 @@ Pruefe regelmaessig:
 - Key Vault > **Monitoring > Logs**.
 - Graph Permission Fehler in Runbook/Web-App-Logs.
 - Bitwarden Send Fehler.
+- Department Summary Mail Fehler.
+- Log Analytics Export Fehler.
 
-## 13. Sicherheitscheck
+## 14. Sicherheitscheck
 
 - Keine Secret-Werte in Cosmos DB.
 - Keine Secret-Werte in Logs.
 - Keine Secret-Werte in Mails.
+- Keine Secret-Werte in Log Analytics.
 - Web-App-Link ist signiert.
 - Web-App-Link laeuft mit dem alten Credential ab.
 - Entra ID Login ist aktiv.

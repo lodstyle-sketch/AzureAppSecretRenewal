@@ -378,6 +378,58 @@ Fuer das Runbook:
 
 Das Runbook ist idempotent. Ein wiederholter Lauf aktualisiert bestehende Faelle statt Duplikate zu erzeugen.
 
+### 11.11 App Overview, Archiv und Reporting
+
+Neben dem Case Container werden zwei weitere Cosmos DB Container verwendet:
+
+```text
+credential-renewal-app-overview
+Partition key: /appObjectId
+
+credential-renewal-archive
+Partition key: /archiveId
+```
+
+Das Scan Runbook schreibt bei jedem Lauf eine Uebersicht aller App Registrations in `credential-renewal-app-overview`. Dadurch sind auch Apps sichtbar, die kein auslaufendes Secret haben. Apps ohne `serviceManagementReference` werden dort ebenfalls abgelegt, starten aber keinen Owner-Workflow.
+
+Wenn eine App Registration in einem frueheren Lauf gesehen wurde und im aktuellen Lauf nicht mehr vorhanden ist, wird sie im Overview auf `deleted` gesetzt. Gleichzeitig wird ein Archiveintrag mit Status `deleted` erzeugt.
+
+Das Archiv speichert ausserdem:
+
+- Secret-Erneuerungen.
+- Alte Secret-Loeschungen nach Web-App-Bestaetigung.
+- Geloeschte App Registrations.
+
+Das Reporting Runbook hat den Entry Point:
+
+```text
+credential_renewal.reporting_export.main
+```
+
+Es exportiert nach Log Analytics:
+
+- `CredentialRenewalCases_CL`
+- `CredentialRenewalAppOverview_CL`
+- `CredentialRenewalArchive_CL`
+
+Die Grafana Templates liegen im Ordner `grafana/`. Das App-Overview-Dashboard hat einen Schalter **Internal app code**. Der Standardwert zeigt Apps ohne internes App-Kuerzel, damit diese nachgepflegt werden koennen.
+
+### 11.12 Abteilungszusammenfassung
+
+Nach jedem abgeschlossenen Scan sendet das Runbook eine Gesamtuebersicht an `DEPARTMENT_SUMMARY_MAILBOX`.
+
+Die Mail enthaelt:
+
+- Alle Apps mit Credentials, die innerhalb von `EXPIRY_WINDOW_DAYS` ablaufen.
+- Azure App Name und App ID.
+- Internes App-Kuerzel oder Hinweis `missing`.
+- Credential Typ, Credential Name, Key ID und Ablaufdatum.
+- Verantwortliche, falls sie bereits aufgeloest wurden.
+- Case Status oder Hinweis auf fehlendes internes App-Kuerzel.
+- Scan-Zaehlwerte und Fehleranzahl.
+
+Auch wenn keine Credentials bald ablaufen, wird eine Mail mit einer entsprechenden Leermeldung versendet. Secret-Werte werden niemals in diese Mail geschrieben.
+
 ## 12. Smoke Test
 
 Empfohlener Testablauf:
@@ -389,14 +441,19 @@ Empfohlener Testablauf:
 5. Sicherstellen, dass die Verantwortlichen in Entra ID gefunden werden.
 6. Runbook manuell starten.
 7. Cosmos DB Case pruefen.
-8. Mailzustellung pruefen.
-9. Web App Link oeffnen.
-10. Entra ID Login pruefen.
-11. **Renew secret** klicken.
-12. Bitwarden Send Link pruefen.
-13. Sicherstellen, dass das alte Secret noch existiert.
-14. **Delete old secret** klicken und Confirm Dialog bestaetigen.
-15. In Entra ID pruefen, dass das alte Secret entfernt wurde.
+8. Cosmos DB App Overview pruefen.
+9. Abteilungszusammenfassung pruefen.
+10. Mailzustellung pruefen.
+11. Web App Link oeffnen.
+12. Entra ID Login pruefen.
+13. **Renew secret** klicken.
+14. Bitwarden Send Link pruefen.
+15. Sicherstellen, dass das alte Secret noch existiert.
+16. **Delete old secret** klicken und Confirm Dialog bestaetigen.
+17. In Entra ID pruefen, dass das alte Secret entfernt wurde.
+18. Archiv Container pruefen.
+19. Reporting Export Runbook starten.
+20. Grafana Dashboards pruefen.
 
 ## 13. Monitoring und Betrieb
 
@@ -409,6 +466,9 @@ Ueberwache:
 - Interne API Fehler
 - Mailversandfehler
 - Bitwarden Send Fehler
+- Abteilungszusammenfassung
+- Log Analytics Export Fehler
+- Grafana Query Fehler
 - Web App 401/403/500 Raten
 
 Typische Fehler:
@@ -426,6 +486,7 @@ Typische Fehler:
 - Secret-Werte duerfen niemals gespeichert werden.
 - Secret-Werte duerfen niemals geloggt werden.
 - Secret-Werte duerfen niemals per Mail verschickt werden.
+- Secret-Werte duerfen niemals nach Log Analytics exportiert werden.
 - Cosmos DB speichert nur Metadaten.
 - Der Web App Link ist wiederverwendbar, aber signiert und zeitlich begrenzt.
 - Entra ID Login ist immer erforderlich.
