@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from credential_renewal.archive import case_archive_entry
+from credential_renewal.models import ArchiveAction
 from credential_renewal.models import CaseState, CredentialCase, CredentialType
 
 
 class CaseWorkflow:
-    def __init__(self, store, graph_client, bitwarden_client) -> None:
+    def __init__(self, store, graph_client, bitwarden_client, archive_store=None) -> None:
         self.store = store
         self.graph_client = graph_client
         self.bitwarden_client = bitwarden_client
+        self.archive_store = archive_store
 
     def renew_secret(self, case_id: str, actor: str) -> CredentialCase:
         case = self._load_editable_case(case_id)
@@ -43,6 +46,16 @@ class CaseWorkflow:
         case.state = CaseState.RENEWED_PENDING_OLD_SECRET_REMOVAL
         case.add_audit_event("renew_secret", actor, {"newCredentialKeyId": new_secret.get("keyId"), "bitwardenSendId": send.send_id})
         self.store.upsert_case(case)
+        self._archive(
+            case_archive_entry(
+                ArchiveAction.SECRET_RENEWED,
+                "renewed",
+                "web-app",
+                case,
+                actor,
+                {"newCredentialKeyId": new_secret.get("keyId"), "bitwardenSendId": send.send_id},
+            )
+        )
         return case
 
     def defer(self, case_id: str, actor: str) -> CredentialCase:
@@ -69,6 +82,16 @@ class CaseWorkflow:
         case.state = CaseState.RENEWED_OLD_SECRET_REMOVED
         case.add_audit_event("delete_old_secret", actor, {"oldCredentialKeyId": case.old_credential.key_id})
         self.store.upsert_case(case)
+        self._archive(
+            case_archive_entry(
+                ArchiveAction.OLD_SECRET_DELETED,
+                "deleted",
+                "web-app",
+                case,
+                actor,
+                {"oldCredentialKeyId": case.old_credential.key_id},
+            )
+        )
         return case
 
     def _load_editable_case(self, case_id: str) -> CredentialCase:
@@ -89,3 +112,7 @@ class CaseWorkflow:
         if not case.first_decision_at:
             case.first_decision_at = decision_time
             case.decision_editable_until = decision_time + timedelta(days=30)
+
+    def _archive(self, entry) -> None:
+        if self.archive_store:
+            self.archive_store.upsert_archive_entry(entry)

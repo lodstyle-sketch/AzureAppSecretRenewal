@@ -13,8 +13,11 @@ class Settings:
     cosmos_account_url: str
     cosmos_database: str
     cosmos_container: str
+    cosmos_app_overview_container: str
+    cosmos_archive_container: str
     webapp_public_base_url: str
     mail_shared_mailbox: str
+    department_summary_mailbox: str
     bitwarden_mode: str
     link_signing_key: str
     cherwell_base_url: str | None
@@ -25,7 +28,9 @@ class Settings:
     cherwell_completed_statuses: set[str]
     log_analytics_dce_url: str | None
     log_analytics_dcr_immutable_id: str | None
-    log_analytics_stream_name: str | None
+    log_analytics_cases_stream_name: str
+    log_analytics_overview_stream_name: str
+    log_analytics_archive_stream_name: str
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -37,8 +42,11 @@ class Settings:
             cosmos_account_url=_required("COSMOS_ACCOUNT_URL"),
             cosmos_database=_required("COSMOS_DATABASE"),
             cosmos_container=_required("COSMOS_CONTAINER"),
+            cosmos_app_overview_container=os.getenv("COSMOS_APP_OVERVIEW_CONTAINER", "credential-renewal-app-overview"),
+            cosmos_archive_container=os.getenv("COSMOS_ARCHIVE_CONTAINER", "credential-renewal-archive"),
             webapp_public_base_url=_required("WEBAPP_PUBLIC_BASE_URL").rstrip("/"),
             mail_shared_mailbox=_required("MAIL_SHARED_MAILBOX"),
+            department_summary_mailbox=_required("DEPARTMENT_SUMMARY_MAILBOX"),
             bitwarden_mode=os.getenv("BITWARDEN_MODE", "send"),
             link_signing_key=_link_signing_key(),
             cherwell_base_url=os.getenv("CHERWELL_BASE_URL", "").rstrip("/") or None,
@@ -49,7 +57,9 @@ class Settings:
             cherwell_completed_statuses=_csv_set(os.getenv("CHERWELL_COMPLETED_STATUSES", "Closed,Completed,Resolved")),
             log_analytics_dce_url=os.getenv("LOG_ANALYTICS_DCE_URL", "").rstrip("/") or None,
             log_analytics_dcr_immutable_id=os.getenv("LOG_ANALYTICS_DCR_IMMUTABLE_ID"),
-            log_analytics_stream_name=os.getenv("LOG_ANALYTICS_STREAM_NAME", "Custom-CredentialRenewalCases_CL"),
+            log_analytics_cases_stream_name=os.getenv("LOG_ANALYTICS_CASES_STREAM_NAME", "Custom-CredentialRenewalCases_CL"),
+            log_analytics_overview_stream_name=os.getenv("LOG_ANALYTICS_OVERVIEW_STREAM_NAME", "Custom-CredentialRenewalAppOverview_CL"),
+            log_analytics_archive_stream_name=os.getenv("LOG_ANALYTICS_ARCHIVE_STREAM_NAME", "Custom-CredentialRenewalArchive_CL"),
         )
 
 

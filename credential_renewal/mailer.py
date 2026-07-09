@@ -27,3 +27,11 @@ class Mailer:
             "toRecipients": [{"emailAddress": {"address": recipient.email}}],
         }
         self.graph_client.send_mail(self.shared_mailbox, message)
+
+    def send_department_summary(self, recipient_mailbox: str, subject: str, html_body: str) -> None:
+        message = {
+            "subject": subject,
+            "body": {"contentType": "HTML", "content": html_body},
+            "toRecipients": [{"emailAddress": {"address": recipient_mailbox}}],
+        }
+        self.graph_client.send_mail(self.shared_mailbox, message)

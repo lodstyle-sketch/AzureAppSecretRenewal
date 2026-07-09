@@ -3,17 +3,18 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from credential_renewal.archive import case_archive_entry
 from credential_renewal.azure_identity import ManagedIdentityTokenProvider
 from credential_renewal.cherwell_client import CherwellClient
 from credential_renewal.config import Settings
-from credential_renewal.cosmos_store import CosmosCaseStore
+from credential_renewal.cosmos_store import CosmosArchiveStore, CosmosCaseStore
 from credential_renewal.graph_client import GraphClient
-from credential_renewal.models import CaseState, CredentialType
+from credential_renewal.models import ArchiveAction, CaseState, CredentialType
 
 logger = logging.getLogger(__name__)
 
 
-def run_status_scan(settings: Settings, store, graph_client: GraphClient, cherwell_client: CherwellClient) -> dict[str, int]:
+def run_status_scan(settings: Settings, store, graph_client: GraphClient, cherwell_client: CherwellClient, archive_store=None) -> dict[str, int]:
     counters = {"cases_checked": 0, "statuses_updated": 0, "old_secrets_removed": 0, "manual_certificate_removals": 0, "errors": 0}
     for case in store.list_cases():
         if not case.cherwell_change_id or case.cherwell_completed_at:
@@ -45,6 +46,22 @@ def run_status_scan(settings: Settings, store, graph_client: GraphClient, cherwe
                         "cherwell-status-runbook",
                         {"oldCredentialKeyId": case.old_credential.key_id, "cherwellStatus": status},
                     )
+                    if archive_store:
+                        archive_store.upsert_archive_entry(
+                            case_archive_entry(
+                                ArchiveAction.OLD_SECRET_DELETED,
+                                "deleted",
+                                "cherwell-status-runbook",
+                                case,
+                                "cherwell",
+                                {
+                                    "oldCredentialKeyId": case.old_credential.key_id,
+                                    "cherwellStatus": status,
+                                    "cherwellChangeId": case.cherwell_change_id,
+                                    "cherwellChangeNumber": case.cherwell_change_number,
+                                },
+                            )
+                        )
                     counters["old_secrets_removed"] += 1
             store.upsert_case(case)
         except Exception:
@@ -58,8 +75,9 @@ def main() -> None:
     settings = Settings.from_environment()
     graph_client = GraphClient(settings.graph_base_url, ManagedIdentityTokenProvider())
     store = CosmosCaseStore(settings.cosmos_account_url, settings.cosmos_database, settings.cosmos_container)
+    archive_store = CosmosArchiveStore(settings.cosmos_account_url, settings.cosmos_database, settings.cosmos_archive_container)
     cherwell_client = _build_cherwell_client(settings)
-    counters = run_status_scan(settings, store, graph_client, cherwell_client)
+    counters = run_status_scan(settings, store, graph_client, cherwell_client, archive_store)
     logger.info("Cherwell status scan completed", extra=counters)
 
 

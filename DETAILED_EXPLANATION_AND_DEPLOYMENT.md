@@ -31,6 +31,7 @@ Die wichtigsten unterstuetzenden Systeme sind:
 - **Bitwarden Send** fuer die einmalige oder kurzlebige Uebergabe des neu erzeugten Secrets.
 - **Cherwell** fuer Change-Erstellung, Statusverfolgung und Freigabe der alten Secret-Loeschung.
 - **Log Analytics und Grafana** fuer Reporting ueber alle Cosmos DB Faelle.
+- **App Overview und Archiv** fuer alle App Registrations, geloeschte Apps, Renewals und Secret-Loeschungen.
 
 Version 1 erneuert nur **Client Secrets** automatisch. Zertifikate werden erkannt und im Fall angezeigt, aber nicht automatisch erneuert.
 
@@ -58,7 +59,7 @@ Beim Start passiert Folgendes:
 6. Relevant sind Credentials, deren `endDateTime` zwischen jetzt und `EXPIRY_WINDOW_DAYS` liegt.
 7. Fuer jedes betroffene Credential wird ein Fall verarbeitet.
 
-Falls eine betroffene App Registration keine `serviceManagementReference` hat, wird kein Case erstellt, kein Cherwell Change erstellt und keine Mail verschickt. Der Fall wird nur geloggt und gezaehlt. Sobald ein Mitarbeiter das interne App-Kuerzel nachtraeglich in der App Registration eintraegt, startet der normale Workflow beim naechsten Scan.
+Falls eine betroffene App Registration keine `serviceManagementReference` hat, wird kein Case erstellt, kein Cherwell Change erstellt und keine Owner-Mail verschickt. Die App wird aber im App Overview gespeichert und in der Abteilungszusammenfassung markiert. Sobald ein Mitarbeiter das interne App-Kuerzel nachtraeglich in der App Registration eintraegt, startet der normale Workflow beim naechsten Scan.
 
 ## 3. Interne Systemabfrage
 
@@ -301,6 +302,8 @@ Zieltabelle:
 
 ```text
 CredentialRenewalCases_CL
+CredentialRenewalAppOverview_CL
+CredentialRenewalArchive_CL
 ```
 
 Exportierte Felder enthalten:
@@ -322,6 +325,8 @@ Das Grafana Template liegt unter:
 
 ```text
 grafana/credential-renewal-cases-dashboard.json
+grafana/app-registration-overview-dashboard.json
+grafana/credential-renewal-archive-dashboard.json
 ```
 
 Es nutzt Azure Monitor/Log Analytics und stellt Suchfelder bereit fuer:
@@ -329,6 +334,7 @@ Es nutzt Azure Monitor/Log Analytics und stellt Suchfelder bereit fuer:
 - Azure App Name
 - Owner, ueber alle Owner einer App hinweg
 - Cherwell ID oder Cherwell Nummer
+- Internal app code im App-Overview-Dashboard, standardmaessig auf fehlende interne App-Kuerzel gesetzt
 
 ## 11. Deployment Checkliste
 
@@ -456,7 +462,9 @@ CHERWELL_CHANGE_TEMPLATE_ID="standard-change-template"
 CHERWELL_COMPLETED_STATUSES="Closed,Completed,Resolved"
 LOG_ANALYTICS_DCE_URL="https://dce.example.region.ingest.monitor.azure.com"
 LOG_ANALYTICS_DCR_IMMUTABLE_ID="dcr-immutable-id"
-LOG_ANALYTICS_STREAM_NAME="Custom-CredentialRenewalCases_CL"
+LOG_ANALYTICS_CASES_STREAM_NAME="Custom-CredentialRenewalCases_CL"
+LOG_ANALYTICS_OVERVIEW_STREAM_NAME="Custom-CredentialRenewalAppOverview_CL"
+LOG_ANALYTICS_ARCHIVE_STREAM_NAME="Custom-CredentialRenewalArchive_CL"
 ```
 
 ### 11.7 Web App Startup Command
@@ -512,6 +520,8 @@ Fuer das Runbook:
 
 Das Runbook ist idempotent. Ein wiederholter Lauf aktualisiert bestehende Faelle statt Duplikate zu erzeugen.
 
+Zusaetzlich schreibt jeder Scan alle App Registrations in den Overview Container `credential-renewal-app-overview`. Apps, die in einem spaeteren Scan nicht mehr gefunden werden, werden dort als `deleted` markiert und im Container `credential-renewal-archive` archiviert. Nach jedem abgeschlossenen Scan sendet das Runbook eine Gesamtuebersicht aller bald ablaufenden Credentials an `DEPARTMENT_SUMMARY_MAILBOX`.
+
 ## 12. Smoke Test
 
 Empfohlener Testablauf:
@@ -523,18 +533,20 @@ Empfohlener Testablauf:
 5. Sicherstellen, dass die Verantwortlichen in Entra ID gefunden werden.
 6. Runbook manuell starten.
 7. Cosmos DB Case pruefen.
-8. Mailzustellung pruefen.
-9. Cherwell Change ID und Nummer in Cosmos DB pruefen.
-10. Web App Link oeffnen.
-11. Entra ID Login pruefen.
-12. **Renew secret** klicken.
-13. Bitwarden Send Link pruefen.
-14. Sicherstellen, dass das alte Secret noch existiert.
-15. Cherwell Change testweise auf abgeschlossen setzen.
-16. Cherwell Status Runbook starten.
-17. In Entra ID pruefen, dass das alte Secret entfernt wurde.
-18. Reporting Export starten.
-19. Grafana Dashboard mit Azure App Name, Owner und Cherwell ID filtern.
+8. App Overview pruefen.
+9. Abteilungszusammenfassung pruefen.
+10. Cherwell Change ID und Nummer in Cosmos DB pruefen.
+11. Web App Link oeffnen.
+12. Entra ID Login pruefen.
+13. **Renew secret** klicken.
+14. Bitwarden Send Link pruefen.
+15. Sicherstellen, dass das alte Secret noch existiert.
+16. Cherwell Change testweise auf abgeschlossen setzen.
+17. Cherwell Status Runbook starten.
+18. In Entra ID pruefen, dass das alte Secret entfernt wurde.
+19. Archiv Container pruefen.
+20. Reporting Export starten.
+21. Grafana Dashboard mit Azure App Name, Owner, Cherwell ID und fehlendem internen App-Kuerzel filtern.
 
 ## 13. Monitoring und Betrieb
 

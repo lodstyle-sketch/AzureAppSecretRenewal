@@ -6,7 +6,7 @@ Der Feature-Branch enthaelt:
 
 - Azure Automation Runbook zum Scannen auslaufender App-Registration-Credentials.
 - FastAPI Web App fuer Entscheidungen der Verantwortlichen.
-- Cosmos DB als Case-Speicher.
+- Cosmos DB als Case-, App-Overview- und Archiv-Speicher.
 - Microsoft Graph fuer App Registration, User Lookup, Mailversand und Secret-Erneuerung.
 - Bitwarden Send fuer die Uebergabe neu erzeugter Secrets.
 - Cherwell Change-Erstellung und Status-Polling.
@@ -82,6 +82,14 @@ Lege dir vor dem Start diese Werte bereit:
 6. Partition key: `/caseId`.
 7. Throughput je nach Umgebung setzen.
 8. **OK** auswaehlen.
+9. **New Container** erneut auswaehlen.
+10. Container ID: `credential-renewal-app-overview`.
+11. Partition key: `/appObjectId`.
+12. **OK** auswaehlen.
+13. **New Container** erneut auswaehlen.
+14. Container ID: `credential-renewal-archive`.
+15. Partition key: `/archiveId`.
+16. **OK** auswaehlen.
 
 ## 4. Key Vault
 
@@ -165,8 +173,11 @@ INTERNAL_API_BASE_URL=https://internal-api.example.com
 COSMOS_ACCOUNT_URL=https://<cosmos-account>.documents.azure.com:443/
 COSMOS_DATABASE=credential-renewal
 COSMOS_CONTAINER=credential-renewal-cases
+COSMOS_APP_OVERVIEW_CONTAINER=credential-renewal-app-overview
+COSMOS_ARCHIVE_CONTAINER=credential-renewal-archive
 WEBAPP_PUBLIC_BASE_URL=https://<web-app-name>.azurewebsites.net
 MAIL_SHARED_MAILBOX=credential-renewal@example.com
+DEPARTMENT_SUMMARY_MAILBOX=department@example.com
 BITWARDEN_MODE=send
 KEY_VAULT_URL=https://<key-vault-name>.vault.azure.net/
 LINK_SIGNING_KEY_SECRET_NAME=credential-renewal-link-signing-key
@@ -178,7 +189,9 @@ CHERWELL_CHANGE_TEMPLATE_ID=<template-id>
 CHERWELL_COMPLETED_STATUSES=Closed,Completed,Resolved
 LOG_ANALYTICS_DCE_URL=https://<dce-name>.<region>.ingest.monitor.azure.com
 LOG_ANALYTICS_DCR_IMMUTABLE_ID=<dcr-immutable-id>
-LOG_ANALYTICS_STREAM_NAME=Custom-CredentialRenewalCases_CL
+LOG_ANALYTICS_CASES_STREAM_NAME=Custom-CredentialRenewalCases_CL
+LOG_ANALYTICS_OVERVIEW_STREAM_NAME=Custom-CredentialRenewalAppOverview_CL
+LOG_ANALYTICS_ARCHIVE_STREAM_NAME=Custom-CredentialRenewalArchive_CL
 ```
 
 5. **Save** auswaehlen.
@@ -436,12 +449,15 @@ GET /applications/{serviceManagementReference}/responsibles
 4. Links **Dashboards** oeffnen.
 5. **New** oder **Import** auswaehlen.
 6. Datei `grafana/credential-renewal-cases-dashboard.json` importieren.
-7. Azure Monitor Datasource auswaehlen.
-8. Dashboard speichern.
-9. Filter testen:
+7. Datei `grafana/app-registration-overview-dashboard.json` importieren.
+8. Datei `grafana/credential-renewal-archive-dashboard.json` importieren.
+9. Azure Monitor Datasource auswaehlen.
+10. Dashboard speichern.
+11. Filter testen:
    - Azure App Name
    - Owner
    - Cherwell ID
+   - Internal app code im App-Overview-Dashboard
 
 ## 13. Smoke Test
 
@@ -454,29 +470,34 @@ GET /applications/{serviceManagementReference}/responsibles
 7. Scan Runbook manuell starten.
 8. Cosmos DB **Data Explorer** oeffnen.
 9. Case in `credential-renewal-cases` pruefen.
-10. Cherwell Change ID und Change Nummer im Case pruefen.
-11. Cherwell UI oeffnen und Change pruefen.
-12. Mailzustellung an Responsible User pruefen.
-13. Link in der Mail oeffnen.
-14. Entra ID Login pruefen.
-15. **Renew secret** klicken.
-16. Bitwarden Send Link pruefen.
-17. In Entra ID pruefen, dass altes und neues Secret vorhanden sind.
-18. Cherwell Change in Cherwell abschliessen.
-19. Cherwell Status Runbook manuell starten.
-20. In Entra ID pruefen, dass das alte Secret entfernt wurde.
-21. Reporting Export Runbook manuell starten.
-22. Grafana Dashboard oeffnen.
-23. Nach Azure App Name, Owner und Cherwell ID suchen.
+10. App Overview in `credential-renewal-app-overview` pruefen.
+11. Abteilungszusammenfassung pruefen.
+12. Cherwell Change ID und Change Nummer im Case pruefen.
+13. Cherwell UI oeffnen und Change pruefen.
+14. Mailzustellung an Responsible User pruefen.
+15. Link in der Mail oeffnen.
+16. Entra ID Login pruefen.
+17. **Renew secret** klicken.
+18. Bitwarden Send Link pruefen.
+19. In Entra ID pruefen, dass altes und neues Secret vorhanden sind.
+20. Cherwell Change in Cherwell abschliessen.
+21. Cherwell Status Runbook manuell starten.
+22. In Entra ID pruefen, dass das alte Secret entfernt wurde.
+23. Archiv in `credential-renewal-archive` pruefen.
+24. Reporting Export Runbook manuell starten.
+25. Grafana Dashboard oeffnen.
+26. Nach Azure App Name, Owner, Cherwell ID und fehlendem internen App-Kuerzel suchen.
 
 ## 14. Fehlendes internes App-Kuerzel testen
 
 1. App Registration mit auslaufendem Credential ohne `serviceManagementReference` vorbereiten.
 2. Scan Runbook starten.
 3. Erwartung:
+   - App ist im Overview sichtbar.
    - Kein Cosmos Case.
    - Kein Cherwell Change.
    - Keine Mail.
+   - Abteilungszusammenfassung markiert das fehlende interne App-Kuerzel.
 4. Internes App-Kuerzel nachtragen.
 5. Scan Runbook erneut starten.
 6. Erwartung:

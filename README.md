@@ -6,7 +6,7 @@ The solution has two runtime entry points:
 
 - **Azure Automation runbook**: scans App Registrations, enriches findings with an internal application system, writes Cosmos DB cases, and sends notification emails.
 - **Cherwell status runbook**: polls Cherwell Changes and removes the old client secret when the Change is completed.
-- **Reporting export runbook**: flattens Cosmos DB cases into Log Analytics for Grafana reporting.
+- **Reporting export runbook**: flattens Cosmos DB cases, App Registration overview, and archive records into Log Analytics for Grafana reporting.
 - **Azure Web App**: shows each case to authorized responsible users and lets them renew a secret, defer renewal, or delete the old secret after a new one was created.
 
 Version 1 renews **client secrets** automatically. Certificates are detected and shown, but certificate renewal is intentionally out of scope because private-key generation and delivery require a separate security design.
@@ -27,6 +27,8 @@ When a user renews a secret, Microsoft Graph creates a new password credential a
 
 When a case has a valid service management reference, the runbook also creates a Cherwell Change containing the Azure, internal-system, owner, and credential metadata. A separate polling runbook checks Cherwell status. When Cherwell reaches a configured completed status, the old client secret is removed even if the owner selected "Do not renew". Certificate cases are marked for manual removal because version 1 does not remove certificates automatically.
 
+Every scan also writes a full App Registration overview record for every discovered application. Apps without `serviceManagementReference` are visible in the overview but do not start the owner workflow or Cherwell creation. Apps that disappear from later scans are marked `deleted` and written to the archive. After each completed scan, a department summary email is sent with all credentials expiring inside the configured window, including apps missing the internal app code.
+
 ## Required Azure Resources
 
 - Azure Automation Account with a system-assigned or user-assigned managed identity.
@@ -46,6 +48,16 @@ Recommended Cosmos DB container:
 Database: credential-renewal
 Container: credential-renewal-cases
 Partition key: /caseId
+```
+
+Additional Cosmos DB containers:
+
+```text
+Container: credential-renewal-app-overview
+Partition key: /appObjectId
+
+Container: credential-renewal-archive
+Partition key: /archiveId
 ```
 
 ## Microsoft Graph Permissions
@@ -71,8 +83,11 @@ INTERNAL_API_BASE_URL="https://internal-api.example.com"
 COSMOS_ACCOUNT_URL="https://cosmos-account.documents.azure.com:443/"
 COSMOS_DATABASE="credential-renewal"
 COSMOS_CONTAINER="credential-renewal-cases"
+COSMOS_APP_OVERVIEW_CONTAINER="credential-renewal-app-overview"
+COSMOS_ARCHIVE_CONTAINER="credential-renewal-archive"
 WEBAPP_PUBLIC_BASE_URL="https://credential-renewal.example.com"
 MAIL_SHARED_MAILBOX="credential-renewal@example.com"
+DEPARTMENT_SUMMARY_MAILBOX="department@example.com"
 BITWARDEN_MODE="send"
 LINK_SIGNING_KEY="replace-with-key-vault-in-production"
 CHERWELL_BASE_URL="https://cherwell.example.com/api"
@@ -83,7 +98,9 @@ CHERWELL_CHANGE_TEMPLATE_ID="standard-change-template"
 CHERWELL_COMPLETED_STATUSES="Closed,Completed,Resolved"
 LOG_ANALYTICS_DCE_URL="https://dce.example.region.ingest.monitor.azure.com"
 LOG_ANALYTICS_DCR_IMMUTABLE_ID="dcr-immutable-id"
-LOG_ANALYTICS_STREAM_NAME="Custom-CredentialRenewalCases_CL"
+LOG_ANALYTICS_CASES_STREAM_NAME="Custom-CredentialRenewalCases_CL"
+LOG_ANALYTICS_OVERVIEW_STREAM_NAME="Custom-CredentialRenewalAppOverview_CL"
+LOG_ANALYTICS_ARCHIVE_STREAM_NAME="Custom-CredentialRenewalArchive_CL"
 # Or use Key Vault:
 KEY_VAULT_URL="https://your-vault.vault.azure.net/"
 LINK_SIGNING_KEY_SECRET_NAME="credential-renewal-link-signing-key"
@@ -125,6 +142,8 @@ Example response:
 The `responsibles` array must contain email or UPN values. Display names are not used as identifiers because they are not unique.
 
 If an expiring App Registration has no `serviceManagementReference`, the runbook does not create a Cosmos DB case, does not create a Cherwell Change, and does not send email. The application owner can add the internal app code later; the next scan will then start the normal workflow.
+
+The app still appears in the overview container and in the department summary email so operations can find and fix missing internal app codes.
 
 ## Cosmos DB Case Schema
 
@@ -272,13 +291,19 @@ The reporting export entry point is:
 python -m credential_renewal.reporting_export
 ```
 
-It flattens Cosmos DB cases and sends rows to Log Analytics custom table `CredentialRenewalCases_CL` using the Logs Ingestion API. The exported row includes Azure app name, owner search text, Cherwell identifiers/status, case state, credential expiry, decision timestamps, and old-secret removal timestamp. Secret values are never exported.
+It flattens Cosmos DB cases, app overview rows, and archive entries and sends them to Log Analytics using the Logs Ingestion API. Secret values are never exported.
 
-Import `grafana/credential-renewal-cases-dashboard.json` into Grafana and select an Azure Monitor datasource. The dashboard contains textbox filters for:
+Export targets:
 
-- Azure App Name
-- Owner, searching all flattened owner names and emails
-- Cherwell ID or Cherwell number
+- `CredentialRenewalCases_CL`
+- `CredentialRenewalAppOverview_CL`
+- `CredentialRenewalArchive_CL`
+
+Import the Grafana JSON files from `grafana/` and select an Azure Monitor datasource. The app overview dashboard includes an internal-code dropdown that defaults to apps without an internal app code.
+
+- `credential-renewal-cases-dashboard.json`
+- `app-registration-overview-dashboard.json`
+- `credential-renewal-archive-dashboard.json`
 
 ## Local Development
 

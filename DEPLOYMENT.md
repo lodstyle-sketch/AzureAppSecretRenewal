@@ -11,6 +11,8 @@ This checklist deploys the feature branch with Azure Automation, FastAPI Web App
 - [ ] Create a Cosmos DB account.
 - [ ] Create Cosmos DB database `credential-renewal`.
 - [ ] Create Cosmos DB container `credential-renewal-cases` with partition key `/caseId`.
+- [ ] Create Cosmos DB container `credential-renewal-app-overview` with partition key `/appObjectId`.
+- [ ] Create Cosmos DB container `credential-renewal-archive` with partition key `/archiveId`.
 - [ ] Create or select an Azure Key Vault.
 - [ ] Create or select the shared mailbox used for notifications.
 - [ ] Create or select Log Analytics Workspace.
@@ -53,8 +55,11 @@ Set these for the Web App and relevant Automation jobs:
 - [ ] `COSMOS_ACCOUNT_URL`
 - [ ] `COSMOS_DATABASE=credential-renewal`
 - [ ] `COSMOS_CONTAINER=credential-renewal-cases`
+- [ ] `COSMOS_APP_OVERVIEW_CONTAINER=credential-renewal-app-overview`
+- [ ] `COSMOS_ARCHIVE_CONTAINER=credential-renewal-archive`
 - [ ] `WEBAPP_PUBLIC_BASE_URL`
 - [ ] `MAIL_SHARED_MAILBOX`
+- [ ] `DEPARTMENT_SUMMARY_MAILBOX`
 - [ ] `BITWARDEN_MODE=send`
 - [ ] `KEY_VAULT_URL`
 - [ ] `LINK_SIGNING_KEY_SECRET_NAME=credential-renewal-link-signing-key`
@@ -66,7 +71,9 @@ Set these for the Web App and relevant Automation jobs:
 - [ ] `CHERWELL_COMPLETED_STATUSES=Closed,Completed,Resolved`
 - [ ] `LOG_ANALYTICS_DCE_URL`
 - [ ] `LOG_ANALYTICS_DCR_IMMUTABLE_ID`
-- [ ] `LOG_ANALYTICS_STREAM_NAME=Custom-CredentialRenewalCases_CL`
+- [ ] `LOG_ANALYTICS_CASES_STREAM_NAME=Custom-CredentialRenewalCases_CL`
+- [ ] `LOG_ANALYTICS_OVERVIEW_STREAM_NAME=Custom-CredentialRenewalAppOverview_CL`
+- [ ] `LOG_ANALYTICS_ARCHIVE_STREAM_NAME=Custom-CredentialRenewalArchive_CL`
 
 ## 6. Web App Deployment
 
@@ -130,6 +137,8 @@ credential_renewal.reporting_export.main
 ## 10. Grafana
 
 - [ ] Import `grafana/credential-renewal-cases-dashboard.json`.
+- [ ] Import `grafana/app-registration-overview-dashboard.json`.
+- [ ] Import `grafana/credential-renewal-archive-dashboard.json`.
 - [ ] Select the Azure Monitor datasource.
 - [ ] Confirm table `CredentialRenewalCases_CL` receives rows.
 - [ ] Test filter `Azure App Name`.
@@ -144,6 +153,8 @@ credential_renewal.reporting_export.main
 - [ ] Ensure the internal API returns at least one responsible user.
 - [ ] Run the scan runbook manually.
 - [ ] Confirm Cosmos DB case creation.
+- [ ] Confirm app overview document creation.
+- [ ] Confirm department summary email delivery.
 - [ ] Confirm Cherwell Change creation.
 - [ ] Confirm notification email delivery.
 - [ ] Open the Web App link and verify Entra ID login.
@@ -163,6 +174,8 @@ credential_renewal.reporting_export.main
 - [ ] Confirm no Cosmos case is created.
 - [ ] Confirm no Cherwell Change is created.
 - [ ] Confirm no notification email is sent.
+- [ ] Confirm the app is visible in the overview dashboard as missing internal app code.
+- [ ] Confirm the department summary marks the missing internal app code.
 - [ ] Add the internal app code to `serviceManagementReference`.
 - [ ] Run the scan runbook again.
 - [ ] Confirm the normal workflow starts.

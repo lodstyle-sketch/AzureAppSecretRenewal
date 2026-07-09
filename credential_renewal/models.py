@@ -23,6 +23,17 @@ class CaseState(StrEnum):
     EXPIRED = "expired"
 
 
+class AppOverviewStatus(StrEnum):
+    ACTIVE = "active"
+    DELETED = "deleted"
+
+
+class ArchiveAction(StrEnum):
+    SECRET_RENEWED = "secret_renewed"
+    OLD_SECRET_DELETED = "old_secret_deleted"
+    APP_DELETED = "app_deleted"
+
+
 @dataclass(frozen=True)
 class ResponsibleUser:
     email: str
@@ -52,6 +63,91 @@ class AuditEvent:
     actor: str
     timestamp: datetime
     details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AppOverview:
+    app_object_id: str
+    app_id: str
+    display_name: str
+    service_management_reference: str | None
+    status: AppOverviewStatus
+    secret_count: int
+    certificate_count: int
+    next_secret_expiry: datetime | None = None
+    next_certificate_expiry: datetime | None = None
+    owners: list[ResponsibleUser] = field(default_factory=list)
+    last_seen_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    deleted_at: datetime | None = None
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def to_document(self) -> dict[str, Any]:
+        document = asdict(self)
+        document["id"] = self.app_object_id
+        return _encode_datetimes(document)
+
+    @classmethod
+    def from_document(cls, document: dict[str, Any]) -> "AppOverview":
+        return cls(
+            app_object_id=document["app_object_id"],
+            app_id=document["app_id"],
+            display_name=document["display_name"],
+            service_management_reference=document.get("service_management_reference"),
+            status=AppOverviewStatus(document.get("status", AppOverviewStatus.ACTIVE)),
+            secret_count=int(document.get("secret_count", 0)),
+            certificate_count=int(document.get("certificate_count", 0)),
+            next_secret_expiry=parse_optional_datetime(document.get("next_secret_expiry")),
+            next_certificate_expiry=parse_optional_datetime(document.get("next_certificate_expiry")),
+            owners=[ResponsibleUser(**owner) for owner in document.get("owners", [])],
+            last_seen_at=parse_datetime(document["last_seen_at"]) if document.get("last_seen_at") else datetime.now(timezone.utc),
+            deleted_at=parse_optional_datetime(document.get("deleted_at")),
+            updated_at=parse_datetime(document["updated_at"]) if document.get("updated_at") else datetime.now(timezone.utc),
+        )
+
+
+@dataclass
+class ArchiveEntry:
+    archive_id: str
+    action: ArchiveAction
+    status: str
+    source: str
+    timestamp: datetime
+    azure_application: AzureApplication
+    credential: CredentialReference | None = None
+    case_id: str | None = None
+    actor: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_document(self) -> dict[str, Any]:
+        document = asdict(self)
+        document["id"] = self.archive_id
+        return _encode_datetimes(document)
+
+    @classmethod
+    def from_document(cls, document: dict[str, Any]) -> "ArchiveEntry":
+        app = document["azure_application"]
+        credential = document.get("credential")
+        return cls(
+            archive_id=document["archive_id"],
+            action=ArchiveAction(document["action"]),
+            status=document["status"],
+            source=document["source"],
+            timestamp=parse_datetime(document["timestamp"]),
+            azure_application=AzureApplication(**app),
+            credential=(
+                CredentialReference(
+                    key_id=credential["key_id"],
+                    display_name=credential.get("display_name"),
+                    credential_type=CredentialType(credential["credential_type"]),
+                    end_date_time=parse_datetime(credential["end_date_time"]),
+                )
+                if credential
+                else None
+            ),
+            case_id=document.get("case_id"),
+            actor=document.get("actor"),
+            details=document.get("details", {}),
+        )
 
 
 @dataclass

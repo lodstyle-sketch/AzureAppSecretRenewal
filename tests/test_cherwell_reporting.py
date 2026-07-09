@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import unittest
 
 from credential_renewal.cherwell_status_scan import run_status_scan
-from credential_renewal.cosmos_store import InMemoryCaseStore
-from credential_renewal.models import AzureApplication, CaseState, CredentialCase, CredentialReference, CredentialType, ResponsibleUser
+from credential_renewal.cosmos_store import InMemoryArchiveStore, InMemoryCaseStore
+from credential_renewal.models import ArchiveAction, AzureApplication, CaseState, CredentialCase, CredentialReference, CredentialType, ResponsibleUser
 from credential_renewal.reporting_export import flatten_case_for_log_analytics
 from credential_renewal.runbook_scan import run_scan
 
@@ -32,9 +32,13 @@ class FakeInternalApi:
 class FakeMailer:
     def __init__(self):
         self.sent = []
+        self.summaries = []
 
     def send_case_notification(self, case, recipient, case_url):
         self.sent.append((case.case_id, recipient.email, case_url))
+
+    def send_department_summary(self, recipient_mailbox: str, subject: str, html_body: str):
+        self.summaries.append((recipient_mailbox, subject, html_body))
 
 
 class FakeCherwell:
@@ -70,6 +74,8 @@ class CherwellReportingTests(unittest.TestCase):
             FakeInternalApi(),
             store,
             mailer,
+            None,
+            None,
             cherwell,
         )
 
@@ -84,8 +90,8 @@ class CherwellReportingTests(unittest.TestCase):
         cherwell = FakeCherwell()
         graph = FakeScanGraph([_graph_application(service_management_reference="PAY")])
 
-        first = run_scan(_settings(), graph, FakeInternalApi(), store, mailer, cherwell)
-        second = run_scan(_settings(), graph, FakeInternalApi(), store, mailer, cherwell)
+        first = run_scan(_settings(), graph, FakeInternalApi(), store, mailer, None, None, cherwell)
+        second = run_scan(_settings(), graph, FakeInternalApi(), store, mailer, None, None, cherwell)
         case = store.list_cases()[0]
 
         self.assertEqual(first["cherwell_changes_created"], 1)
@@ -97,21 +103,27 @@ class CherwellReportingTests(unittest.TestCase):
 
     def test_completed_cherwell_change_deletes_old_secret_once_even_after_defer(self):
         store = InMemoryCaseStore()
+        archive_store = InMemoryArchiveStore()
         case = _case(CredentialType.SECRET)
         case.state = CaseState.DEFERRED
         case.cherwell_change_id = "chg-id-1"
+        case.cherwell_change_number = "CHG0001"
         store.upsert_case(case)
         graph = FakeRemovalGraph()
 
-        first = run_status_scan(_settings(), store, graph, FakeCherwell(status="Closed"))
-        second = run_status_scan(_settings(), store, graph, FakeCherwell(status="Closed"))
+        first = run_status_scan(_settings(), store, graph, FakeCherwell(status="Closed"), archive_store)
+        second = run_status_scan(_settings(), store, graph, FakeCherwell(status="Closed"), archive_store)
         updated = store.get_case(case.case_id)
+        archives = archive_store.list_archive_entries()
 
         self.assertEqual(first["old_secrets_removed"], 1)
         self.assertEqual(second["old_secrets_removed"], 0)
         self.assertEqual(graph.removed, [("app-object-id", "old-key")])
         self.assertEqual(updated.state, CaseState.CHERWELL_COMPLETED_OLD_SECRET_REMOVED)
         self.assertIsNotNone(updated.old_secret_removed_at)
+        self.assertEqual(len(archives), 1)
+        self.assertEqual(archives[0].action, ArchiveAction.OLD_SECRET_DELETED)
+        self.assertEqual(archives[0].details["cherwellChangeNumber"], "CHG0001")
 
     def test_completed_cherwell_change_for_certificate_requires_manual_removal(self):
         store = InMemoryCaseStore()
@@ -149,6 +161,7 @@ def _settings():
         link_signing_key="test-signing-key",
         webapp_public_base_url="https://credential-renewal.example.com",
         cherwell_completed_statuses={"closed", "completed", "resolved"},
+        department_summary_mailbox="department@example.com",
     )
 
 
