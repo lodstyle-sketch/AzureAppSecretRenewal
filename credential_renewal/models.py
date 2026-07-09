@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from enum import StrEnum
+from typing import Any
+
+
+class CredentialType(StrEnum):
+    SECRET = "secret"
+    CERTIFICATE = "certificate"
+
+
+class CaseState(StrEnum):
+    OPEN = "open"
+    RENEWED_PENDING_OLD_SECRET_REMOVAL = "renewed_pending_old_secret_removal"
+    RENEWED_OLD_SECRET_REMOVED = "renewed_old_secret_removed"
+    DEFERRED = "deferred"
+    ERROR = "error"
+    EXPIRED = "expired"
+
+
+@dataclass(frozen=True)
+class ResponsibleUser:
+    email: str
+    display_name: str | None = None
+    entra_id: str | None = None
+
+
+@dataclass(frozen=True)
+class AzureApplication:
+    object_id: str
+    app_id: str
+    display_name: str
+    service_management_reference: str | None
+
+
+@dataclass(frozen=True)
+class CredentialReference:
+    key_id: str
+    display_name: str | None
+    credential_type: CredentialType
+    end_date_time: datetime
+
+
+@dataclass
+class AuditEvent:
+    action: str
+    actor: str
+    timestamp: datetime
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CredentialCase:
+    case_id: str
+    azure_application: AzureApplication
+    old_credential: CredentialReference
+    link_expires_at: datetime
+    state: CaseState = CaseState.OPEN
+    internal_metadata: dict[str, Any] = field(default_factory=dict)
+    responsible_users: list[ResponsibleUser] = field(default_factory=list)
+    new_credential: dict[str, Any] | None = None
+    bitwarden_send: dict[str, Any] | None = None
+    defer_until: datetime | None = None
+    first_decision_at: datetime | None = None
+    decision_editable_until: datetime | None = None
+    old_secret_removed_at: datetime | None = None
+    audit_events: list[AuditEvent] = field(default_factory=list)
+    email_sent_at: datetime | None = None
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def add_audit_event(self, action: str, actor: str, details: dict[str, Any] | None = None) -> None:
+        self.audit_events.append(
+            AuditEvent(
+                action=action,
+                actor=actor,
+                timestamp=datetime.now(timezone.utc),
+                details=details or {},
+            )
+        )
+        self.updated_at = datetime.now(timezone.utc)
+
+    def to_document(self) -> dict[str, Any]:
+        document = asdict(self)
+        document["id"] = self.case_id
+        return _encode_datetimes(document)
+
+    @classmethod
+    def from_document(cls, document: dict[str, Any]) -> "CredentialCase":
+        app = document["azure_application"]
+        old = document["old_credential"]
+        return cls(
+            case_id=document["case_id"],
+            azure_application=AzureApplication(**app),
+            old_credential=CredentialReference(
+                key_id=old["key_id"],
+                display_name=old.get("display_name"),
+                credential_type=CredentialType(old["credential_type"]),
+                end_date_time=parse_datetime(old["end_date_time"]),
+            ),
+            link_expires_at=parse_datetime(document["link_expires_at"]),
+            state=CaseState(document.get("state", CaseState.OPEN)),
+            internal_metadata=document.get("internal_metadata", {}),
+            responsible_users=[ResponsibleUser(**user) for user in document.get("responsible_users", [])],
+            new_credential=document.get("new_credential"),
+            bitwarden_send=document.get("bitwarden_send"),
+            defer_until=parse_optional_datetime(document.get("defer_until")),
+            first_decision_at=parse_optional_datetime(document.get("first_decision_at")),
+            decision_editable_until=parse_optional_datetime(document.get("decision_editable_until")),
+            old_secret_removed_at=parse_optional_datetime(document.get("old_secret_removed_at")),
+            audit_events=[
+                AuditEvent(
+                    action=event["action"],
+                    actor=event["actor"],
+                    timestamp=parse_datetime(event["timestamp"]),
+                    details=event.get("details", {}),
+                )
+                for event in document.get("audit_events", [])
+            ],
+            email_sent_at=parse_optional_datetime(document.get("email_sent_at")),
+            updated_at=parse_datetime(document["updated_at"]) if document.get("updated_at") else datetime.now(timezone.utc),
+        )
+
+
+def parse_optional_datetime(value: str | None) -> datetime | None:
+    return parse_datetime(value) if value else None
+
+
+def parse_datetime(value: str) -> datetime:
+    normalized = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _encode_datetimes(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if isinstance(value, list):
+        return [_encode_datetimes(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _encode_datetimes(item) for key, item in value.items()}
+    if isinstance(value, StrEnum):
+        return value.value
+    return value
