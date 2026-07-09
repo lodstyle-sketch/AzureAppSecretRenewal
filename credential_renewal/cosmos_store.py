@@ -23,6 +23,11 @@ class CosmosCaseStore:
     def upsert_case(self, case: CredentialCase) -> None:
         self.container.upsert_item(case.to_document())
 
+    def list_cases(self) -> list[CredentialCase]:
+        query = "SELECT * FROM c"
+        documents = self.container.query_items(query=query, enable_cross_partition_query=True)
+        return [CredentialCase.from_document(document) for document in documents]
+
 
 class InMemoryCaseStore:
     def __init__(self) -> None:
@@ -34,3 +39,6 @@ class InMemoryCaseStore:
 
     def upsert_case(self, case: CredentialCase) -> None:
         self.documents[case.case_id] = case.to_document()
+
+    def list_cases(self) -> list[CredentialCase]:
+        return [CredentialCase.from_document(document) for document in self.documents.values()]

@@ -13,8 +13,11 @@ class CredentialType(StrEnum):
 
 class CaseState(StrEnum):
     OPEN = "open"
+    CHERWELL_PENDING = "cherwell_pending"
     RENEWED_PENDING_OLD_SECRET_REMOVAL = "renewed_pending_old_secret_removal"
     RENEWED_OLD_SECRET_REMOVED = "renewed_old_secret_removed"
+    CHERWELL_COMPLETED_OLD_SECRET_REMOVED = "cherwell_completed_old_secret_removed"
+    MANUAL_CERTIFICATE_REMOVAL_REQUIRED = "manual_certificate_removal_required"
     DEFERRED = "deferred"
     ERROR = "error"
     EXPIRED = "expired"
@@ -62,6 +65,12 @@ class CredentialCase:
     responsible_users: list[ResponsibleUser] = field(default_factory=list)
     new_credential: dict[str, Any] | None = None
     bitwarden_send: dict[str, Any] | None = None
+    cherwell_change_id: str | None = None
+    cherwell_change_number: str | None = None
+    cherwell_status: str | None = None
+    cherwell_created_at: datetime | None = None
+    cherwell_last_checked_at: datetime | None = None
+    cherwell_completed_at: datetime | None = None
     defer_until: datetime | None = None
     first_decision_at: datetime | None = None
     decision_editable_until: datetime | None = None
@@ -105,6 +114,12 @@ class CredentialCase:
             responsible_users=[ResponsibleUser(**user) for user in document.get("responsible_users", [])],
             new_credential=document.get("new_credential"),
             bitwarden_send=document.get("bitwarden_send"),
+            cherwell_change_id=document.get("cherwell_change_id"),
+            cherwell_change_number=document.get("cherwell_change_number"),
+            cherwell_status=document.get("cherwell_status"),
+            cherwell_created_at=parse_optional_datetime(document.get("cherwell_created_at")),
+            cherwell_last_checked_at=parse_optional_datetime(document.get("cherwell_last_checked_at")),
+            cherwell_completed_at=parse_optional_datetime(document.get("cherwell_completed_at")),
             defer_until=parse_optional_datetime(document.get("defer_until")),
             first_decision_at=parse_optional_datetime(document.get("first_decision_at")),
             decision_editable_until=parse_optional_datetime(document.get("decision_editable_until")),

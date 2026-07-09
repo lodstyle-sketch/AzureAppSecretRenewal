@@ -6,6 +6,7 @@ from typing import Any
 
 from credential_renewal.azure_identity import ManagedIdentityTokenProvider
 from credential_renewal.case_ids import build_case_id
+from credential_renewal.cherwell_client import CherwellClient, apply_created_change
 from credential_renewal.config import Settings
 from credential_renewal.cosmos_store import CosmosCaseStore
 from credential_renewal.expiry import expiring_credentials
@@ -18,9 +19,24 @@ from credential_renewal.tokens import create_case_token
 logger = logging.getLogger(__name__)
 
 
-def run_scan(settings: Settings, graph_client: GraphClient, internal_api: InternalApplicationApi, store, mailer: Mailer) -> dict[str, int]:
+def run_scan(
+    settings: Settings,
+    graph_client: GraphClient,
+    internal_api: InternalApplicationApi,
+    store,
+    mailer: Mailer,
+    cherwell_client=None,
+) -> dict[str, int]:
     now = datetime.now(timezone.utc)
-    counters = {"applications": 0, "expiring_credentials": 0, "cases_upserted": 0, "emails_sent": 0, "errors": 0}
+    counters = {
+        "applications": 0,
+        "expiring_credentials": 0,
+        "missing_internal_reference": 0,
+        "cherwell_changes_created": 0,
+        "cases_upserted": 0,
+        "emails_sent": 0,
+        "errors": 0,
+    }
 
     for graph_application in graph_client.list_applications():
         counters["applications"] += 1
@@ -35,7 +51,12 @@ def run_scan(settings: Settings, graph_client: GraphClient, internal_api: Intern
         for credential in credentials:
             try:
                 if not application.service_management_reference:
-                    raise ValueError("Application has no serviceManagementReference.")
+                    counters["missing_internal_reference"] += 1
+                    logger.warning(
+                        "Skipping expiring credential because the application has no serviceManagementReference",
+                        extra={"applicationId": application.app_id, "credentialKeyId": credential.key_id},
+                    )
+                    continue
                 internal_details = internal_api.get_application_details(application.service_management_reference)
                 responsible_users = _resolve_responsibles(graph_client, internal_details)
                 case_id = build_case_id(application, credential)
@@ -49,6 +70,11 @@ def run_scan(settings: Settings, graph_client: GraphClient, internal_api: Intern
                 case.internal_metadata = _without_responsibles(internal_details)
                 case.responsible_users = responsible_users
                 case.add_audit_event("scan_detected_expiring_credential", "automation-runbook")
+                if cherwell_client and not case.cherwell_change_id:
+                    change = cherwell_client.create_change(case)
+                    apply_created_change(case, change)
+                    case.state = CaseState.CHERWELL_PENDING
+                    counters["cherwell_changes_created"] += 1
                 store.upsert_case(case)
                 counters["cases_upserted"] += 1
                 if not case.email_sent_at:
@@ -102,8 +128,28 @@ def main() -> None:
     internal_api = InternalApplicationApi(settings.internal_api_base_url)
     store = CosmosCaseStore(settings.cosmos_account_url, settings.cosmos_database, settings.cosmos_container)
     mailer = Mailer(graph_client, settings.mail_shared_mailbox)
-    counters = run_scan(settings, graph_client, internal_api, store, mailer)
+    cherwell_client = _build_cherwell_client(settings)
+    counters = run_scan(settings, graph_client, internal_api, store, mailer, cherwell_client)
     logger.info("Credential scan completed", extra=counters)
+
+
+def _build_cherwell_client(settings: Settings) -> CherwellClient | None:
+    required = [
+        settings.cherwell_base_url,
+        settings.cherwell_token_url,
+        settings.cherwell_client_id,
+        settings.cherwell_client_secret,
+    ]
+    if not all(required):
+        logger.warning("Cherwell integration is not fully configured; changes will not be created.")
+        return None
+    return CherwellClient(
+        base_url=settings.cherwell_base_url or "",
+        token_url=settings.cherwell_token_url or "",
+        client_id=settings.cherwell_client_id or "",
+        client_secret=settings.cherwell_client_secret or "",
+        change_template_id=settings.cherwell_change_template_id,
+    )
 
 
 if __name__ == "__main__":

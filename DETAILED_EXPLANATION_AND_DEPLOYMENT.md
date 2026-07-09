@@ -29,6 +29,8 @@ Die wichtigsten unterstuetzenden Systeme sind:
 - **Key Vault** fuer produktive Secrets wie den Link-Signing-Key.
 - **Internes REST-System** fuer die Zuordnung von `serviceManagementReference` zu Verantwortlichen.
 - **Bitwarden Send** fuer die einmalige oder kurzlebige Uebergabe des neu erzeugten Secrets.
+- **Cherwell** fuer Change-Erstellung, Statusverfolgung und Freigabe der alten Secret-Loeschung.
+- **Log Analytics und Grafana** fuer Reporting ueber alle Cosmos DB Faelle.
 
 Version 1 erneuert nur **Client Secrets** automatisch. Zertifikate werden erkannt und im Fall angezeigt, aber nicht automatisch erneuert.
 
@@ -56,7 +58,7 @@ Beim Start passiert Folgendes:
 6. Relevant sind Credentials, deren `endDateTime` zwischen jetzt und `EXPIRY_WINDOW_DAYS` liegt.
 7. Fuer jedes betroffene Credential wird ein Fall verarbeitet.
 
-Falls eine betroffene App Registration keine `serviceManagementReference` hat, kann sie nicht gegen das interne System gemappt werden. Der Fehler wird geloggt, und das Runbook verarbeitet die naechste App weiter.
+Falls eine betroffene App Registration keine `serviceManagementReference` hat, wird kein Case erstellt, kein Cherwell Change erstellt und keine Mail verschickt. Der Fall wird nur geloggt und gezaehlt. Sobald ein Mitarbeiter das interne App-Kuerzel nachtraeglich in der App Registration eintraegt, startet der normale Workflow beim naechsten Scan.
 
 ## 3. Interne Systemabfrage
 
@@ -126,6 +128,15 @@ Ein Fall enthaelt unter anderem:
 
 Das neue Secret selbst wird niemals in Cosmos DB gespeichert.
 
+Zusaetzlich werden Cherwell-Felder gespeichert:
+
+- Cherwell Change ID
+- Cherwell Change Nummer
+- Cherwell Status
+- Cherwell Erstellzeitpunkt
+- Cherwell zuletzt geprueft
+- Cherwell abgeschlossen am
+
 ## 6. Benachrichtigung und Unique Link
 
 Wenn ein Fall neu ist oder noch keine Mail verschickt wurde, erzeugt das Runbook einen signierten Link:
@@ -145,6 +156,31 @@ Die Sicherheit basiert auf mehreren Ebenen:
 5. Die Web App erlaubt nur Responsible Users des Falls.
 
 Die Mail wird ueber Microsoft Graph aus der konfigurierten Shared Mailbox gesendet.
+
+## 6.1 Cherwell Change-Erstellung
+
+Nach erfolgreicher interner Systemabfrage und Entra ID User-Aufloesung erstellt das Runbook einen Cherwell Change.
+
+Der Change enthaelt:
+
+- Azure App Name
+- App ID
+- App Object ID
+- Service Management Reference
+- Credential Typ
+- Credential Key ID
+- Ablaufdatum
+- Verantwortliche
+- Interne System-Metadaten
+- Cosmos Case ID
+
+Die Erstellung ist idempotent. Wenn ein Cosmos Case bereits eine Cherwell ID hat, wird bei spaeteren Scans kein zweiter Change erstellt.
+
+Der Case Status wird nach der Change-Erstellung:
+
+```text
+cherwell_pending
+```
 
 ## 7. Web App Ablauf
 
@@ -228,6 +264,72 @@ deferred
 
 Die Entscheidung bleibt innerhalb des Entscheidungsfensters aenderbar, solange das alte Credential noch nicht abgelaufen ist.
 
+## 10.1 Cherwell Completion und automatische alte Secret-Loeschung
+
+Ein zweites Automation Runbook prueft regelmaessig offene Cherwell Changes.
+
+Entry Point:
+
+```text
+credential_renewal.cherwell_status_scan.main
+```
+
+Das Runbook:
+
+1. Liest alle Cosmos DB Faelle.
+2. Filtert Faelle mit Cherwell Change ID.
+3. Fragt den aktuellen Cherwell Status per REST API ab.
+4. Schreibt Status und Pruefzeitpunkt in Cosmos DB.
+5. Vergleicht den Status mit `CHERWELL_COMPLETED_STATUSES`.
+6. Wenn der Status abgeschlossen ist, wird das alte Client Secret ueber Microsoft Graph `removePassword` geloescht.
+
+Diese Regel gilt unabhaengig davon, ob der User vorher **Renew secret** oder **Do not renew** gewaehlt hat.
+
+Wenn das alte Secret bereits geloescht wurde, wird Graph nicht erneut aufgerufen. Wenn das Credential ein Zertifikat ist, wird der Case auf `manual_certificate_removal_required` gesetzt, weil Version 1 keine Zertifikate automatisch entfernt.
+
+## 10.2 Grafana Reporting
+
+Ein weiteres Runbook exportiert die Cosmos DB Faelle als flache Reporting-Zeilen nach Log Analytics.
+
+Entry Point:
+
+```text
+credential_renewal.reporting_export.main
+```
+
+Zieltabelle:
+
+```text
+CredentialRenewalCases_CL
+```
+
+Exportierte Felder enthalten:
+
+- Azure App Name
+- Azure App ID
+- Credential Typ
+- Ablaufdatum
+- Owner als zusammengefasster Suchtext
+- Cherwell ID
+- Cherwell Nummer
+- Cherwell Status
+- Case Status
+- Service Management Reference
+- Entscheidungszeitpunkte
+- Zeitpunkt der alten Secret-Loeschung
+
+Das Grafana Template liegt unter:
+
+```text
+grafana/credential-renewal-cases-dashboard.json
+```
+
+Es nutzt Azure Monitor/Log Analytics und stellt Suchfelder bereit fuer:
+
+- Azure App Name
+- Owner, ueber alle Owner einer App hinweg
+- Cherwell ID oder Cherwell Nummer
+
 ## 11. Deployment Checkliste
 
 ### 11.1 Azure Ressourcen
@@ -244,6 +346,8 @@ Erstelle oder waehle:
 - Key Vault
 - Shared Mailbox
 - Optional: Application Insights und Log Analytics
+- Cherwell REST API Zugang
+- Grafana mit Azure Monitor Datasource
 
 Empfohlene Cosmos DB Struktur:
 
@@ -274,6 +378,25 @@ Noetige Graph Permissions:
 Alle Permissions brauchen Admin Consent.
 
 Wenn moeglich, ist `Application.ReadWrite.OwnedBy` sicherer als `Application.ReadWrite.All`, setzt aber voraus, dass die verwendete Identity Owner der betroffenen App Registrations ist.
+
+### 11.3.1 Cherwell Konfiguration
+
+Setze fuer Runbook und Web App beziehungsweise fuer die Automation Jobs:
+
+```bash
+CHERWELL_BASE_URL="https://cherwell.example.com/api"
+CHERWELL_TOKEN_URL="https://cherwell.example.com/token"
+CHERWELL_CLIENT_ID="credential-renewal"
+CHERWELL_CLIENT_SECRET="replace-with-key-vault-in-production"
+CHERWELL_CHANGE_TEMPLATE_ID="standard-change-template"
+CHERWELL_COMPLETED_STATUSES="Closed,Completed,Resolved"
+```
+
+Produktiv sollte `CHERWELL_CLIENT_SECRET` aus Key Vault kommen:
+
+```bash
+CHERWELL_AUTH_SECRET_NAME="cherwell-client-secret"
+```
 
 ### 11.4 Cosmos DB Rechte
 
@@ -325,6 +448,15 @@ MAIL_SHARED_MAILBOX="credential-renewal@example.com"
 BITWARDEN_MODE="send"
 KEY_VAULT_URL="https://your-vault.vault.azure.net/"
 LINK_SIGNING_KEY_SECRET_NAME="credential-renewal-link-signing-key"
+CHERWELL_BASE_URL="https://cherwell.example.com/api"
+CHERWELL_TOKEN_URL="https://cherwell.example.com/token"
+CHERWELL_CLIENT_ID="credential-renewal"
+CHERWELL_AUTH_SECRET_NAME="cherwell-client-secret"
+CHERWELL_CHANGE_TEMPLATE_ID="standard-change-template"
+CHERWELL_COMPLETED_STATUSES="Closed,Completed,Resolved"
+LOG_ANALYTICS_DCE_URL="https://dce.example.region.ingest.monitor.azure.com"
+LOG_ANALYTICS_DCR_IMMUTABLE_ID="dcr-immutable-id"
+LOG_ANALYTICS_STREAM_NAME="Custom-CredentialRenewalCases_CL"
 ```
 
 ### 11.7 Web App Startup Command
@@ -375,6 +507,8 @@ Fuer das Runbook:
 5. Environment Variables oder Automation Variables setzen.
 6. Entry Point auf `credential_renewal.runbook_scan.main` legen.
 7. Schedule erstellen, z. B. einmal taeglich.
+8. Cherwell Status Runbook `credential_renewal.cherwell_status_scan.main` alle 15 bis 60 Minuten ausfuehren.
+9. Reporting Export Runbook `credential_renewal.reporting_export.main` im gewuenschten Reporting-Intervall ausfuehren.
 
 Das Runbook ist idempotent. Ein wiederholter Lauf aktualisiert bestehende Faelle statt Duplikate zu erzeugen.
 
@@ -390,13 +524,17 @@ Empfohlener Testablauf:
 6. Runbook manuell starten.
 7. Cosmos DB Case pruefen.
 8. Mailzustellung pruefen.
-9. Web App Link oeffnen.
-10. Entra ID Login pruefen.
-11. **Renew secret** klicken.
-12. Bitwarden Send Link pruefen.
-13. Sicherstellen, dass das alte Secret noch existiert.
-14. **Delete old secret** klicken und Confirm Dialog bestaetigen.
-15. In Entra ID pruefen, dass das alte Secret entfernt wurde.
+9. Cherwell Change ID und Nummer in Cosmos DB pruefen.
+10. Web App Link oeffnen.
+11. Entra ID Login pruefen.
+12. **Renew secret** klicken.
+13. Bitwarden Send Link pruefen.
+14. Sicherstellen, dass das alte Secret noch existiert.
+15. Cherwell Change testweise auf abgeschlossen setzen.
+16. Cherwell Status Runbook starten.
+17. In Entra ID pruefen, dass das alte Secret entfernt wurde.
+18. Reporting Export starten.
+19. Grafana Dashboard mit Azure App Name, Owner und Cherwell ID filtern.
 
 ## 13. Monitoring und Betrieb
 
@@ -409,6 +547,9 @@ Ueberwache:
 - Interne API Fehler
 - Mailversandfehler
 - Bitwarden Send Fehler
+- Cherwell API Fehler
+- Cherwell Statuswerte, die nicht zu `CHERWELL_COMPLETED_STATUSES` passen
+- Log Analytics Export Fehler
 - Web App 401/403/500 Raten
 
 Typische Fehler:
@@ -420,6 +561,8 @@ Typische Fehler:
 - Web App Managed Identity hat keinen Key Vault Zugriff.
 - Bitwarden CLI ist nicht installiert oder nicht authentifiziert.
 - Cosmos DB Rechte fehlen.
+- Cherwell Credentials fehlen oder sind abgelaufen.
+- Log Analytics DCE/DCR Konfiguration ist falsch.
 
 ## 14. Sicherheitsnotizen
 
@@ -431,7 +574,9 @@ Typische Fehler:
 - Entra ID Login ist immer erforderlich.
 - Zusaetzlich muss der Benutzer Responsible User des Falls sein.
 - Das alte Secret wird erst nach expliziter Bestaetigung geloescht.
+- Sobald Cherwell abgeschlossen ist, loescht das Polling Runbook das alte Client Secret automatisch, auch wenn der User vorher nicht erneuern gewaehlt hat.
 - Audit Events dokumentieren Scan, Mailversand, Renewal, Deferral und Loeschung.
+- Secret-Werte werden nicht nach Log Analytics exportiert.
 
 ## 15. Wichtige Grenzen von Version 1
 
@@ -440,3 +585,5 @@ Typische Fehler:
 - Die interne REST API muss bereits existieren oder separat implementiert werden.
 - Graph Permissions muessen tenant-seitig sauber genehmigt werden.
 - Fuer sehr grosse Tenants muss Graph Throttling beobachtet werden, insbesondere beim Abruf von `keyCredentials`.
+- Cherwell-Feldnamen und Statuswerte muessen bei Bedarf an die konkrete Cherwell-Instanz angepasst werden.
+- Grafana zeigt Daten aus Log Analytics, nicht direkt aus Cosmos DB.
