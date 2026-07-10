@@ -14,6 +14,8 @@ This repository contains a Python workflow for Azure App Registration credential
 - `credential_renewal/models.py`: case, credential, owner, and state models.
 - `credential_renewal/cosmos_store.py`: Cosmos DB store plus test in-memory store.
 - `grafana/`: Grafana dashboard templates for cases, app overview, and archive.
+- `terraform/`: Terraform bootstrap, reusable module, dev/prod environments, and Automation runbook wrappers.
+- `scripts/build_deployment_artifacts.sh`: builds `dist/webapp.zip` and the Automation wheel consumed by Terraform.
 - `tests/`: standard-library `unittest` tests.
 - `README.md`: main technical overview.
 - `DETAILED_EXPLANATION_AND_DEPLOYMENT.md`: detailed German explanation.
@@ -29,6 +31,8 @@ This repository contains a Python workflow for Azure App Registration credential
 - If an App Registration has no `serviceManagementReference`, do not create a Cosmos case, Cherwell Change, or email notification.
 - Store every App Registration in the app overview, including apps without `serviceManagementReference`.
 - Archive secret renewals, old-secret deletions, Cherwell-triggered deletions, and deleted App Registrations.
+- Cosmos DB containers must use partition key `/id`; the Python documents store logical IDs in the `id` field.
+- Terraform must keep `enable_cherwell` and `enable_graph_app_role_assignments` as explicit toggles.
 - Keep branch-specific docs aligned with branch behavior. This feature branch includes Cherwell and Grafana reporting.
 
 ## Validation
@@ -38,10 +42,11 @@ Run these checks before committing code changes:
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests
 PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile credential_renewal/*.py tests/*.py
+terraform fmt -recursive terraform
 python3 -m json.tool grafana/credential-renewal-cases-dashboard.json
 python3 -m json.tool grafana/app-registration-overview-dashboard.json
 python3 -m json.tool grafana/credential-renewal-archive-dashboard.json
-rg -n "^(<<<<<<<|=======|>>>>>>>)" README.md DETAILED_EXPLANATION_AND_DEPLOYMENT.md DEPLOYMENT.md DEPLOYMENT_DETAILED.md agents.md grafana/*.json
+rg -n "^(<<<<<<<|=======|>>>>>>>)" README.md DETAILED_EXPLANATION_AND_DEPLOYMENT.md DEPLOYMENT.md DEPLOYMENT_DETAILED.md agents.md terraform grafana/*.json
 ```
 
 The `rg` command should return no matches. Exit code `1` from `rg` is acceptable when no merge markers are found.

@@ -1,0 +1,9 @@
+location             = "westeurope"
+resource_group_name  = "rg-credential-renewal-tfstate"
+storage_account_name = "credrenewtfstate001"
+container_name       = "tfstate"
+
+tags = {
+  workload = "credential-renewal"
+  managed  = "terraform"
+}

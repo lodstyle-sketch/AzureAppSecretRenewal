@@ -338,6 +338,37 @@ Es nutzt Azure Monitor/Log Analytics und stellt Suchfelder bereit fuer:
 
 ## 11. Deployment Checkliste
 
+### 11.0 Terraform Deployment
+
+Der bevorzugte Deployment-Weg liegt unter `terraform/`.
+
+```bash
+./scripts/build_deployment_artifacts.sh
+
+cd terraform/bootstrap
+cp terraform.tfvars.example terraform.tfvars
+terraform init
+terraform apply
+
+cd ../envs/prod
+cp backend.hcl.example backend.hcl
+cp terraform.tfvars.example terraform.tfvars
+terraform init -backend-config=backend.hcl
+terraform plan
+terraform apply
+```
+
+`terraform/bootstrap` erstellt den Remote State Storage Account. `terraform/envs/dev` und `terraform/envs/prod` verwenden das wiederverwendbare Modul `terraform/modules/credential-renewal`.
+
+Wichtige Terraform-Schalter:
+
+- `enable_cherwell=false` fuer ein Deployment ohne Cherwell Status Runbook.
+- `enable_cherwell=true` fuer den Feature Branch mit Cherwell Change-Erstellung und Status Polling.
+- `enable_graph_app_role_assignments=false`, wenn Graph Rechte manuell vergeben werden.
+- `enable_graph_app_role_assignments=true`, wenn Terraform Graph App Role Assignments setzen soll.
+
+Terraform erstellt keine Grafana-Instanz. Die Dashboard JSON Dateien aus `grafana/` werden in eine bestehende Grafana Umgebung importiert.
+
 ### 11.1 Azure Ressourcen
 
 Erstelle oder waehle:
@@ -360,7 +391,13 @@ Empfohlene Cosmos DB Struktur:
 ```text
 Database: credential-renewal
 Container: credential-renewal-cases
-Partition key: /caseId
+Partition key: /id
+
+Container: credential-renewal-app-overview
+Partition key: /id
+
+Container: credential-renewal-archive
+Partition key: /id
 ```
 
 ### 11.2 Managed Identities
@@ -419,7 +456,7 @@ Mindestens benoetigt:
 Lege einen Signing Key an, z. B.:
 
 ```text
-credential-renewal-link-signing-key
+link-signing-key
 ```
 
 Die Web App und das Runbook muessen das Secret lesen duerfen.
@@ -428,7 +465,7 @@ App Settings:
 
 ```bash
 KEY_VAULT_URL="https://your-vault.vault.azure.net/"
-LINK_SIGNING_KEY_SECRET_NAME="credential-renewal-link-signing-key"
+LINK_SIGNING_KEY_SECRET_NAME="link-signing-key"
 ```
 
 Alternativ fuer lokale Tests:
@@ -453,7 +490,7 @@ WEBAPP_PUBLIC_BASE_URL="https://your-webapp.azurewebsites.net"
 MAIL_SHARED_MAILBOX="credential-renewal@example.com"
 BITWARDEN_MODE="send"
 KEY_VAULT_URL="https://your-vault.vault.azure.net/"
-LINK_SIGNING_KEY_SECRET_NAME="credential-renewal-link-signing-key"
+LINK_SIGNING_KEY_SECRET_NAME="link-signing-key"
 CHERWELL_BASE_URL="https://cherwell.example.com/api"
 CHERWELL_TOKEN_URL="https://cherwell.example.com/token"
 CHERWELL_CLIENT_ID="credential-renewal"

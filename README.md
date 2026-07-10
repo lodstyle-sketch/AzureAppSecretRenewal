@@ -34,7 +34,7 @@ Every scan also writes a full App Registration overview record for every discove
 - Azure Automation Account with a system-assigned or user-assigned managed identity.
 - Azure Web App for the FastAPI application.
 - Managed identity for the Web App.
-- Cosmos DB account, database, and container.
+- Cosmos DB account, database, and containers.
 - Key Vault for production secrets such as the link signing key and internal API credentials.
 - Shared Exchange Online mailbox for notifications.
 - Microsoft Graph application permissions granted to the managed identities.
@@ -42,22 +42,18 @@ Every scan also writes a full App Registration overview record for every discove
 - Cherwell REST API credentials for Change creation and status polling.
 - Log Analytics Data Collection Endpoint and Data Collection Rule for Grafana reporting.
 
-Recommended Cosmos DB container:
+Recommended Cosmos DB containers:
 
 ```text
 Database: credential-renewal
 Container: credential-renewal-cases
-Partition key: /caseId
-```
+Partition key: /id
 
-Additional Cosmos DB containers:
-
-```text
 Container: credential-renewal-app-overview
-Partition key: /appObjectId
+Partition key: /id
 
 Container: credential-renewal-archive
-Partition key: /archiveId
+Partition key: /id
 ```
 
 ## Microsoft Graph Permissions
@@ -70,6 +66,8 @@ Grant and admin-consent the minimum permissions required for your tenant model:
 - `Mail.Send` for shared-mailbox notification delivery.
 
 Use separate managed identities for the Automation Account and Web App if you want tighter privilege separation. The runbook needs read and mail permissions; the Web App needs secret creation/removal permissions.
+
+Terraform can optionally create Graph app-role assignments through `azuread_app_role_assignment`. Keep this disabled unless the Terraform identity has the required Entra permissions and your tenant admin is ready to consent the assignments.
 
 ## Configuration
 
@@ -103,7 +101,7 @@ LOG_ANALYTICS_OVERVIEW_STREAM_NAME="Custom-CredentialRenewalAppOverview_CL"
 LOG_ANALYTICS_ARCHIVE_STREAM_NAME="Custom-CredentialRenewalArchive_CL"
 # Or use Key Vault:
 KEY_VAULT_URL="https://your-vault.vault.azure.net/"
-LINK_SIGNING_KEY_SECRET_NAME="credential-renewal-link-signing-key"
+LINK_SIGNING_KEY_SECRET_NAME="link-signing-key"
 CHERWELL_AUTH_SECRET_NAME="cherwell-client-secret"
 ```
 
@@ -174,6 +172,30 @@ Supported states:
 - `expired`
 
 Secret values must never be stored in Cosmos DB, logs, emails, or audit events.
+
+## Terraform Deployment
+
+The repository contains Terraform in `terraform/` for both the base workflow and the Cherwell feature workflow.
+
+```bash
+./scripts/build_deployment_artifacts.sh
+
+cd terraform/bootstrap
+cp terraform.tfvars.example terraform.tfvars
+terraform init
+terraform apply
+
+cd ../envs/dev
+cp backend.hcl.example backend.hcl
+cp terraform.tfvars.example terraform.tfvars
+terraform init -backend-config=backend.hcl
+terraform plan
+terraform apply
+```
+
+Use `enable_cherwell=false` for a main-compatible deployment and `enable_cherwell=true` for the Cherwell feature branch. Terraform creates the App Service, Automation Account, Cosmos DB containers with partition key `/id`, Key Vault, Log Analytics/DCR, Automation schedules, managed identities, Azure RBAC, and optional Graph app-role assignments. Grafana itself is not created; import the JSON dashboards from `grafana/`.
+
+Azure Automation dependencies from `requirements.txt` must be supplied through the Terraform `automation_dependency_packages` map using enterprise-approved package artifact URLs.
 
 ## Runbook Deployment
 

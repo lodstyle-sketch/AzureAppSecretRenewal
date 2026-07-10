@@ -45,6 +45,50 @@ Lege dir vor dem Start diese Werte bereit:
 3. Stelle oben rechts sicher, dass der richtige Tenant ausgewaehlt ist.
 4. Oeffne oben die Suche und pruefe, ob du die gewuenschte Subscription sehen kannst.
 
+### 1.3 Terraform Deployment verwenden
+
+Der empfohlene Weg ist Terraform. Die manuellen Portal-Schritte darunter bleiben als Orientierung und Kontrolle erhalten.
+
+1. Stelle sicher, dass Terraform und Azure CLI installiert sind.
+2. Im Repository Root die Deployment-Artefakte bauen:
+
+```bash
+./scripts/build_deployment_artifacts.sh
+```
+
+3. Remote State vorbereiten:
+
+```bash
+cd terraform/bootstrap
+cp terraform.tfvars.example terraform.tfvars
+terraform init
+terraform apply
+```
+
+4. Die Outputs `backend_resource_group_name`, `backend_storage_account_name` und `backend_container_name` in `terraform/envs/dev/backend.hcl` oder `terraform/envs/prod/backend.hcl` eintragen.
+5. Umgebung konfigurieren:
+
+```bash
+cd ../envs/prod
+cp backend.hcl.example backend.hcl
+cp terraform.tfvars.example terraform.tfvars
+```
+
+6. In `terraform.tfvars` die Tenant ID, Mailboxen, interne API, Web-App-URL, Cherwell-Werte und Tags setzen.
+7. Fuer den Basisworkflow `enable_cherwell=false` setzen.
+8. Fuer den Cherwell Feature Branch `enable_cherwell=true` setzen.
+9. `enable_graph_app_role_assignments=false` lassen, wenn Graph Rechte manuell vergeben werden.
+10. Azure Automation Dependencies aus `requirements.txt` als freigegebene Paket-URLs in `automation_dependency_packages` eintragen.
+11. Deployment starten:
+
+```bash
+terraform init -backend-config=backend.hcl
+terraform plan
+terraform apply
+```
+
+Terraform erstellt Resource Group, Storage fuer Artefakte, Key Vault, Cosmos DB, App Service, Automation Account, Runbooks, Schedules, Log Analytics, Data Collection Endpoint, Data Collection Rule, Azure RBAC und optional Graph App Role Assignments. Grafana selbst wird nicht erstellt; die JSON-Dateien aus `grafana/` werden importiert.
+
 ## 2. Resource Group
 
 1. Im Azure Portal oben in die Suche klicken.
@@ -79,16 +123,16 @@ Lege dir vor dem Start diese Werte bereit:
 3. **New Container** auswaehlen.
 4. Database ID: `credential-renewal`.
 5. Container ID: `credential-renewal-cases`.
-6. Partition key: `/caseId`.
+6. Partition key: `/id`.
 7. Throughput je nach Umgebung setzen.
 8. **OK** auswaehlen.
 9. **New Container** erneut auswaehlen.
 10. Container ID: `credential-renewal-app-overview`.
-11. Partition key: `/appObjectId`.
+11. Partition key: `/id`.
 12. **OK** auswaehlen.
 13. **New Container** erneut auswaehlen.
 14. Container ID: `credential-renewal-archive`.
-15. Partition key: `/archiveId`.
+15. Partition key: `/id`.
 16. **OK** auswaehlen.
 
 ## 4. Key Vault
@@ -110,7 +154,7 @@ Lege dir vor dem Start diese Werte bereit:
 1. Key Vault oeffnen.
 2. Links **Objects > Secrets** auswaehlen.
 3. **Generate/Import** auswaehlen.
-4. Secret `credential-renewal-link-signing-key` mit langem Zufallswert erstellen.
+4. Secret `link-signing-key` mit langem Zufallswert erstellen.
 5. Wieder **Generate/Import** auswaehlen.
 6. Secret `cherwell-client-secret` mit dem Cherwell Client Secret erstellen.
 
@@ -180,7 +224,7 @@ MAIL_SHARED_MAILBOX=credential-renewal@example.com
 DEPARTMENT_SUMMARY_MAILBOX=department@example.com
 BITWARDEN_MODE=send
 KEY_VAULT_URL=https://<key-vault-name>.vault.azure.net/
-LINK_SIGNING_KEY_SECRET_NAME=credential-renewal-link-signing-key
+LINK_SIGNING_KEY_SECRET_NAME=link-signing-key
 CHERWELL_BASE_URL=https://cherwell.example.com/api
 CHERWELL_TOKEN_URL=https://cherwell.example.com/token
 CHERWELL_CLIENT_ID=credential-renewal
