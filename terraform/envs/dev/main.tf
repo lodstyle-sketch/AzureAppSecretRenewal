@@ -1,0 +1,30 @@
+module "credential_renewal" {
+  source = "../../modules/credential-renewal"
+
+  environment                       = var.environment
+  location                          = var.location
+  resource_prefix                   = var.resource_prefix
+  tags                              = var.tags
+  tenant_id                         = var.tenant_id
+  create_resource_group             = var.create_resource_group
+  resource_group_name               = var.resource_group_name
+  internal_api_base_url             = var.internal_api_base_url
+  mail_shared_mailbox               = var.mail_shared_mailbox
+  department_summary_mailbox        = var.department_summary_mailbox
+  webapp_public_base_url            = var.webapp_public_base_url
+  webapp_zip_path                   = var.webapp_zip_path
+  automation_wheel_path             = var.automation_wheel_path
+  application_package_version       = var.application_package_version
+  automation_dependency_packages    = var.automation_dependency_packages
+  enable_cherwell                   = var.enable_cherwell
+  enable_graph_app_role_assignments = var.enable_graph_app_role_assignments
+  cherwell_base_url                 = var.cherwell_base_url
+  cherwell_token_url                = var.cherwell_token_url
+  cherwell_client_id                = var.cherwell_client_id
+  cherwell_client_secret            = var.cherwell_client_secret
+  cherwell_change_template_id       = var.cherwell_change_template_id
+  cherwell_completed_statuses       = var.cherwell_completed_statuses
+  scan_schedule                     = var.scan_schedule
+  cherwell_status_schedule          = var.cherwell_status_schedule
+  reporting_export_schedule         = var.reporting_export_schedule
+}

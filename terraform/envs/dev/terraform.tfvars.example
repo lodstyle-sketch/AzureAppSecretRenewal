@@ -1,0 +1,28 @@
+tenant_id                  = "00000000-0000-0000-0000-000000000000"
+location                   = "westeurope"
+resource_prefix            = "credrenew"
+resource_group_name        = "rg-credential-renewal-dev"
+internal_api_base_url      = "https://internal-api.example.com"
+mail_shared_mailbox        = "credential-renewal@example.com"
+department_summary_mailbox = "department@example.com"
+webapp_public_base_url     = "https://credrenew-dev-web.example.com"
+
+webapp_zip_path       = "../../../dist/webapp.zip"
+automation_wheel_path = "../../../dist/azure_app_credential_renewal-0.1.0-py3-none-any.whl"
+
+enable_cherwell                   = false
+enable_graph_app_role_assignments = false
+
+tags = {
+  environment = "dev"
+  workload    = "credential-renewal"
+}
+
+# Fill this map with enterprise-approved package artifact URLs for Azure Automation.
+# Example shape:
+# automation_dependency_packages = {
+#   requests = {
+#     content_uri     = "https://files.pythonhosted.org/packages/source/r/requests/requests-2.32.3.tar.gz"
+#     content_version = "2.32.3"
+#   }
+# }

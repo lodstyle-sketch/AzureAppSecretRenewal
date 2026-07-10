@@ -1,0 +1,4 @@
+resource_group_name  = "rg-credential-renewal-tfstate"
+storage_account_name = "credrenewtfstate001"
+container_name       = "tfstate"
+key                  = "credential-renewal-prod.tfstate"

@@ -1,6 +1,40 @@
 # Deployment Checklist
 
-This checklist deploys the main branch with the base Azure Automation scan runbook and FastAPI Web App workflow.
+This checklist deploys the main branch with the Azure Automation scan runbook, FastAPI Web App workflow, Log Analytics export, and Grafana reporting. Terraform is the recommended deployment path.
+
+## 0. Terraform Deployment
+
+- [ ] Build deployment artifacts:
+
+```bash
+./scripts/build_deployment_artifacts.sh
+```
+
+- [ ] Bootstrap remote state:
+
+```bash
+cd terraform/bootstrap
+cp terraform.tfvars.example terraform.tfvars
+terraform init
+terraform apply
+```
+
+- [ ] Configure the target environment:
+
+```bash
+cd ../envs/dev
+cp backend.hcl.example backend.hcl
+cp terraform.tfvars.example terraform.tfvars
+terraform init -backend-config=backend.hcl
+terraform plan
+terraform apply
+```
+
+- [ ] Use `enable_cherwell=false` for the main-compatible deployment.
+- [ ] Use `enable_cherwell=true` for the Cherwell feature branch.
+- [ ] Keep `enable_graph_app_role_assignments=false` unless the Terraform identity has the required Entra permissions.
+- [ ] Provide Azure Automation dependency package URLs through `automation_dependency_packages`.
+- [ ] Import Grafana JSON files manually; Terraform does not create Grafana.
 
 ## 1. Azure Resources
 
@@ -10,9 +44,9 @@ This checklist deploys the main branch with the base Azure Automation scan runbo
 - [ ] Create an Azure Linux Web App with Python 3.11 or newer.
 - [ ] Create a Cosmos DB account.
 - [ ] Create Cosmos DB database `credential-renewal`.
-- [ ] Create Cosmos DB container `credential-renewal-cases` with partition key `/caseId`.
-- [ ] Create Cosmos DB container `credential-renewal-app-overview` with partition key `/appObjectId`.
-- [ ] Create Cosmos DB container `credential-renewal-archive` with partition key `/archiveId`.
+- [ ] Create Cosmos DB container `credential-renewal-cases` with partition key `/id`.
+- [ ] Create Cosmos DB container `credential-renewal-app-overview` with partition key `/id`.
+- [ ] Create Cosmos DB container `credential-renewal-archive` with partition key `/id`.
 - [ ] Create or select an Azure Key Vault.
 - [ ] Create or select the shared mailbox used for notifications.
 - [ ] Create or select Log Analytics Workspace.
@@ -37,7 +71,7 @@ This checklist deploys the main branch with the base Azure Automation scan runbo
 
 ## 4. Key Vault Secrets
 
-- [ ] Add `credential-renewal-link-signing-key`.
+- [ ] Add `link-signing-key`.
 - [ ] Grant read permission to the Automation Account identity.
 - [ ] Grant read permission to the Web App identity.
 
@@ -58,13 +92,13 @@ Set these for the Web App and Automation job:
 - [ ] `MAIL_SHARED_MAILBOX`
 - [ ] `DEPARTMENT_SUMMARY_MAILBOX`
 - [ ] `BITWARDEN_MODE=send`
+- [ ] `KEY_VAULT_URL`
+- [ ] `LINK_SIGNING_KEY_SECRET_NAME=link-signing-key`
 - [ ] `LOG_ANALYTICS_DCE_URL`
 - [ ] `LOG_ANALYTICS_DCR_IMMUTABLE_ID`
 - [ ] `LOG_ANALYTICS_CASES_STREAM_NAME=Custom-CredentialRenewalCases_CL`
 - [ ] `LOG_ANALYTICS_OVERVIEW_STREAM_NAME=Custom-CredentialRenewalAppOverview_CL`
 - [ ] `LOG_ANALYTICS_ARCHIVE_STREAM_NAME=Custom-CredentialRenewalArchive_CL`
-- [ ] `KEY_VAULT_URL`
-- [ ] `LINK_SIGNING_KEY_SECRET_NAME=credential-renewal-link-signing-key`
 
 ## 6. Web App Deployment
 
